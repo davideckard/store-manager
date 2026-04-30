@@ -1,36 +1,155 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Store Manager
 
-## Getting Started
+A unified web application for managing WooCommerce sites and running product upload, audit, and fix jobs against them. Replaces the separate `storeconfig` and `product-uploader` services.
 
-First, run the development server:
+## Tech Stack
+
+- **Web:** Next.js 15 + TypeScript + Tailwind CSS
+- **Database:** PostgreSQL via Prisma ORM
+- **Worker:** Python 3 (`upload.py`) — spawned as a subprocess per job
+- **Deployment:** Docker + docker-compose
+
+---
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 20+
+- Python 3.11+
+- A running PostgreSQL instance (shared with the existing `storeconfig` DB)
+
+### 1. Install dependencies
+
+```bash
+npm install
+pip install -r worker/requirements.txt
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` and fill in:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql://user:pass@localhost:5432/config`) |
+| `ORDERBOARD_API_URL` | Orderboard base URL (default: `https://orderboard.mlswebstores.com`) |
+| `ORDERBOARD_EMAIL` | Orderboard login email |
+| `ORDERBOARD_PASSWORD` | Orderboard login password |
+| `STORE_MANAGER_URL` | URL this server is reachable at by the Python worker (default: `http://localhost:3000`) |
+| `JOBS_DIR` | Directory for per-job logs and reports (default: `/data/jobs`) |
+
+### 3. Run database migration
+
+This adds the `Job` table. The existing `MLS_Webstore` and `OrderDesk` tables are left untouched.
+
+```bash
+npx prisma migrate dev
+```
+
+### 4. Start the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). The app redirects to `/jobs` by default.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pages
 
-## Learn More
+### /jobs — Job Management
 
-To learn more about Next.js, take a look at the following resources:
+Submit and monitor upload, audit, and fix jobs:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Select a **site** (loaded from the database) and an **orderboard store**
+- Choose a **mode:** Upload, Audit, or Fix
+- **Upload** mode has an optional *Force delete & re-create* checkbox
+- **Fix** mode can be seeded from a previous audit job's report
+- The jobs table auto-refreshes every 3 seconds
+- Click a row to view the live log and report
+- Completed audit jobs with issues show a **Fix Issues** button that starts a targeted fix job
+- Use the **↻** (replay) button to re-run a finished job with the same parameters
+- Use the **✕** button to remove a finished job, or **Cancel** to stop a running one
+- Download the raw log or report with the **Log ↓** / **Report ↓** buttons
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### /sites — Site Management
 
-## Deploy on Vercel
+Full CRUD for WooCommerce site credentials:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Search by name, slug, or SKU
+- Sort by any column
+- Paginate (10 / 20 / 50 / 100 per page)
+- **Copy** an existing site as a starting point for a new one
+- Edit or delete any site
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## Deployment
+
+### Build a distributable zip
+
+```bash
+make dist
+```
+
+Creates `dist/store-manager-YYYYMMDD.zip`. Override the date with `make dist VERSION=1.2.3`.
+
+### Deploy to the remote server
+
+```bash
+./deploy.sh
+```
+
+This will:
+1. Build the zip if one doesn't exist yet
+2. Upload it to `david@192.168.0.9:/home/david/docker-images/store-manager/`
+3. SSH in, unzip, and run `docker compose up -d --build`
+
+### Docker environment variables
+
+Set these in `docker-compose.yml` before deploying:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/config
+  - ORDERBOARD_API_URL=https://orderboard.mlswebstores.com
+  - ORDERBOARD_EMAIL=your@email.com
+  - ORDERBOARD_PASSWORD=yourpassword
+  - STORE_MANAGER_URL=http://localhost:3000
+  - JOBS_DIR=/data/jobs
+```
+
+Job logs and reports are persisted in the `store_manager_data` Docker volume mounted at `/data`.
+
+---
+
+## Migration from Previous Services
+
+### storeconfig
+
+The `storeconfig` service (FastAPI + React + PostgreSQL) is replaced by this app. Its `MLS_Webstore` and `OrderDesk` tables are reused directly — no data migration needed, just point `DATABASE_URL` at the same PostgreSQL instance.
+
+Once Store Manager is running and verified, the `storeconfig` Docker container can be decommissioned.
+
+### product-uploader
+
+The `product-uploader` service (FastAPI + vanilla JS + SQLite) is replaced by this app. The Python worker (`upload.py`) is copied into `worker/` unchanged.
+
+The only config change: replace `DATABASE_SERVER_URL` with `STORE_MANAGER_URL` in any environment that runs the worker directly. The worker now calls `/api/sites` and `/api/orderdesk` on this server instead of the old storeconfig endpoints.
+
+---
+
+## Future: WooCommerce Product Querying
+
+Add a new API route at `src/app/api/woocommerce/[siteId]/products/route.ts` that:
+1. Looks up site credentials from Prisma
+2. Calls the WooCommerce REST API with pagination
+3. Returns the product list with variations
+
+No structural changes to the app are needed.

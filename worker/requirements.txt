@@ -1,0 +1,5 @@
+woocommerce
+requests
+Pillow
+fastapi
+uvicorn[standard]

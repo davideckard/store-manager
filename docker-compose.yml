@@ -1,0 +1,19 @@
+services:
+  store-manager:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - store_manager_data:/data
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ORDERBOARD_API_URL=${ORDERBOARD_API_URL}
+      - ORDERBOARD_EMAIL=${ORDERBOARD_EMAIL}
+      - ORDERBOARD_PASSWORD=${ORDERBOARD_PASSWORD}
+      - STORE_MANAGER_URL=${STORE_MANAGER_URL:-http://localhost:3000}
+      - API_TOKEN=${API_TOKEN}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - JOBS_DIR=/data/jobs
+
+volumes:
+  store_manager_data:

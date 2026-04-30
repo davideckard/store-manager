@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model MLS_Webstore {
+  id       Int    @id @default(autoincrement())
+  slug     String @unique
+  sku      String @unique
+  name     String
+  domain   String
+  url      String
+  key      String
+  secret   String
+  app_user String
+  app_pass String
+}
+
+model OrderDesk {
+  id            Int    @id @default(autoincrement())
+  orderDeskId   String
+  name          String
+  sku           String
+  apiKey        String
+  shipStationId String
+}
+
+model Job {
+  id         String    @id @default(uuid())
+  siteId     String
+  mode       String
+  params     String
+  status     String    @default("pending")
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  exitCode   Int?
+}
+
+model User {
+  id       String  @id @default(cuid())
+  email    String  @unique
+  name     String?
+  password String
+}
