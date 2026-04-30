@@ -30,7 +30,6 @@ ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN mkdir -p /data/jobs
-VOLUME ["/data"]
 EXPOSE 3000
 
 CMD ["node", "server.js"]
