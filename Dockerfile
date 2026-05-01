@@ -31,4 +31,4 @@ ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
 EXPOSE 3000
-CMD ["sh", "-c", "mkdir -p /data/jobs && node server.js"]
+CMD ["sh", "-c", "mkdir -p /data/jobs; node server.js"]
