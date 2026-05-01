@@ -34,4 +34,4 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN mkdir -p /data/jobs
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "PORT=3000 node server.js"]
