@@ -33,4 +33,4 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN mkdir -p /data/jobs
 EXPOSE 8080
 
-CMD ["sh", "-c", "PORT=8080 node server.js"]
+CMD ["node", "server.js"]
