@@ -27,6 +27,7 @@ COPY worker/ ./worker/
 
 ENV PATH="/data/venv/bin:$PATH"
 ENV NODE_ENV=production
+ENV PORT=3000
 ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
