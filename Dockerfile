@@ -33,4 +33,5 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN mkdir -p /data/jobs
 EXPOSE 8080
 
+
 CMD ["node", "server.js"]
