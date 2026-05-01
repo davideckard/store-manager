@@ -27,11 +27,10 @@ COPY worker/ ./worker/
 
 ENV PATH="/venv/bin:$PATH"
 ENV NODE_ENV=production
-ENV PORT=3000
 ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN mkdir -p /data/jobs
 EXPOSE 3000
 
-CMD ["sh", "-c", "PORT=3000 node server.js"]
+CMD ["node", "server.js"]
