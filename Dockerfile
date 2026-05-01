@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y python3 python3-pip python3-venv --no-i
 
 # Python worker deps in a venv
 COPY worker/requirements.txt ./worker/requirements.txt
-RUN python3 -m venv /data/venv && /data/venv/bin/pip install --no-cache-dir -r worker/requirements.txt
+RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r worker/requirements.txt
 
 COPY --from=web-builder /app/.next/standalone ./
 COPY --from=web-builder /app/.next/static ./.next/static
@@ -25,7 +25,7 @@ COPY --from=web-builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=web-builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY worker/ ./worker/
 
-ENV PATH="/data/venv/bin:$PATH"
+ENV PATH="/venv/bin:$PATH"
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV JOBS_DIR=/data/jobs
