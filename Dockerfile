@@ -33,5 +33,26 @@ ENV NODE_ENV=production
 ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
+COPY <<'EOF' /app/start.sh
+#!/bin/sh
+set -e
+
+echo "Starting store-manager..."
+
+# Ensure job log directory exists (volume mount replaces build-time mkdir)
+mkdir -p /data/jobs
+
+# Run migrations
+echo "Running database migrations..."
+npx prisma migrate deploy || {
+  echo "WARNING: Migration failed, continuing anyway..."
+}
+
+echo "Starting Next.js server..."
+exec node /app/server.js
+EOF
+
+RUN chmod +x /app/start.sh
+
 EXPOSE 3000
-CMD ["sh", "-c", "mkdir -p /data/jobs; node /app/server.js"]
+CMD ["/app/start.sh"]
