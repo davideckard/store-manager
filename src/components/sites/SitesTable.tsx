@@ -21,7 +21,9 @@ export function SitesTable() {
 
   const load = useCallback(async () => {
     const res = await fetch('/api/sites')
-    setSites(await res.json())
+    if (!res.ok) return
+    const data = await res.json()
+    if (Array.isArray(data)) setSites(data)
   }, [])
 
   useEffect(() => { load() }, [load])
