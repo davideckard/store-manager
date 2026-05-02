@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { ConfirmModal } from '@/components/modals/ConfirmModal'
+import { AddUserModal } from '@/components/modals/AddUserModal'
+import { ResetPasswordModal } from '@/components/modals/ResetPasswordModal'
 
 interface User {
   id: string
@@ -11,11 +13,8 @@ interface User {
 
 export default function UtilitiesPage() {
   const [users, setUsers] = useState<User[]>([])
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [resetTarget, setResetTarget] = useState<User | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
 
   const load = useCallback(async () => {
@@ -25,29 +24,32 @@ export default function UtilitiesPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function addUser(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    setSaving(true)
+  async function addUser(email: string, password: string, name: string): Promise<string | null> {
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, name }),
     })
-    setSaving(false)
     if (!res.ok) {
-      try {
-        const data = await res.json()
-        setError(data.error ?? 'Failed to create user')
-      } catch {
-        setError('Failed to create user')
-      }
-      return
+      try { return (await res.json()).error ?? 'Failed to create user' } catch { return 'Failed to create user' }
     }
-    setEmail('')
-    setPassword('')
-    setName('')
+    setAddOpen(false)
     load()
+    return null
+  }
+
+  async function resetPassword(password: string): Promise<string | null> {
+    if (!resetTarget) return null
+    const res = await fetch(`/api/users/${resetTarget.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    if (!res.ok) {
+      try { return (await res.json()).error ?? 'Failed to reset password' } catch { return 'Failed to reset password' }
+    }
+    setResetTarget(null)
+    return null
   }
 
   async function deleteUser() {
@@ -61,54 +63,16 @@ export default function UtilitiesPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-xl font-semibold text-slate-800">Utilities</h1>
 
-      <div className="bg-white rounded-xl shadow-sm p-5">
-        <h2 className="text-base font-semibold text-slate-800 mb-4">Add User</h2>
-        <form onSubmit={addUser} className="grid grid-cols-2 gap-3">
-          <div className="col-span-2 sm:col-span-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
-            <input
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Optional"
-              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#2387a6]"
-            />
-          </div>
-          <div className="col-span-2 sm:col-span-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#2387a6]"
-            />
-          </div>
-          <div className="col-span-2 sm:col-span-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#2387a6]"
-            />
-          </div>
-          {error && <p className="col-span-2 text-sm text-red-600">{error}</p>}
-          <div className="col-span-2 flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 rounded-lg bg-[#692a77] text-white text-sm font-medium hover:bg-[#5a2368] disabled:opacity-50"
-            >
-              {saving ? 'Adding…' : 'Add User'}
-            </button>
-          </div>
-        </form>
-      </div>
-
       <div className="bg-white rounded-xl shadow-sm">
-        <div className="px-4 py-3 border-b border-slate-100">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <h2 className="text-base font-semibold text-slate-800">Users</h2>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="w-7 h-7 flex items-center justify-center rounded-lg bg-[#692a77] text-white text-lg font-medium hover:bg-[#5a2368] leading-none"
+            title="Add user"
+          >
+            +
+          </button>
         </div>
         <table className="w-full text-sm">
           <thead>
@@ -127,18 +91,35 @@ export default function UtilitiesPage() {
                 <td className="px-4 py-2 font-medium text-slate-800">{u.name ?? '—'}</td>
                 <td className="px-4 py-2 text-slate-500">{u.email}</td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    onClick={() => setDeleteTarget(u)}
-                    className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setResetTarget(u)}
+                      className="text-xs px-2 py-1 bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+                    >
+                      Reset Password
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(u)}
+                      className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <AddUserModal open={addOpen} onSave={addUser} onCancel={() => setAddOpen(false)} />
+
+      <ResetPasswordModal
+        open={!!resetTarget}
+        userName={resetTarget?.email ?? null}
+        onSave={resetPassword}
+        onCancel={() => setResetTarget(null)}
+      />
 
       <ConfirmModal
         open={!!deleteTarget}
