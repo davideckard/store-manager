@@ -24,8 +24,8 @@ COPY --from=web-builder /app/public ./public
 COPY --from=web-builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=web-builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=web-builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=web-builder /app/node_modules/.bin/prisma* ./node_modules/.bin/
 COPY --from=web-builder /app/prisma ./prisma
+RUN ln -sf ../prisma/build/index.js /app/node_modules/.bin/prisma && chmod +x /app/node_modules/.bin/prisma
 COPY worker/ ./worker/
 
 ENV PATH="/venv/bin:$PATH"
