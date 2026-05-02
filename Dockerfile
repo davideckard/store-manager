@@ -23,9 +23,9 @@ COPY --from=web-builder /app/.next/static ./.next/static
 COPY --from=web-builder /app/public ./public
 COPY --from=web-builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=web-builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=web-builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=web-builder /app/prisma ./prisma
-RUN mkdir -p /app/node_modules/.bin && ln -sf ../prisma/build/index.js /app/node_modules/.bin/prisma && chmod +x /app/node_modules/.bin/prisma
+COPY package*.json ./
+RUN npm install prisma --no-save --ignore-scripts
 COPY worker/ ./worker/
 
 ENV PATH="/venv/bin:$PATH"
