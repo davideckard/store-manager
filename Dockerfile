@@ -11,7 +11,7 @@ RUN npm run build
 FROM node:20-slim
 WORKDIR /app
 
-ARG CACHEBUST=1
+ARG CACHEBUST=2
 RUN apt-get update && apt-get install -y python3 python3-pip python3-venv --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Python worker deps in a venv
