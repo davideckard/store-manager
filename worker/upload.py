@@ -1147,7 +1147,7 @@ def audit_store(wcapi, site, data, output_file,
 
 
 def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalog_colors, output_file,
-              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None):
+              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None, square_pad=False):
     """
     Audit the store, then for each product with hard issues delete it from
     WooCommerce and re-upload it fresh. Missing products are uploaded normally.
@@ -1201,7 +1201,7 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
             fix_lines.append(f"  [FAIL]    [{ep['sku']}] {ep['name']} — delete failed HTTP {resp.status_code}")
             continue
         try:
-            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors)
+            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad)
             fixed.append(ep)
             fix_lines.append(f"  [FIXED]   [{ep['sku']}] {ep['name']}")
             logger.info("Re-uploaded '%s' successfully.", ep["name"])
@@ -1216,7 +1216,7 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
     for ep in gathered["missing"]:
         logger.info("Uploading missing product '%s'...", ep["name"])
         try:
-            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors)
+            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad)
             uploaded_new.append(ep)
             fix_lines.append(f"  [UPLOADED] [{ep['sku']}] {ep['name']}")
             logger.info("Uploaded '%s' successfully.", ep["name"])
@@ -1679,6 +1679,7 @@ def main():
             orderboard_store_id=ob_store_id,
             orderboard_url=ob_url,
             filter_skus=filter_skus,
+            square_pad=args.square_pad,
         )
         return
 
