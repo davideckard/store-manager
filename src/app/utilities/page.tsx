@@ -36,8 +36,12 @@ export default function UtilitiesPage() {
     })
     setSaving(false)
     if (!res.ok) {
-      const data = await res.json()
-      setError(data.error ?? 'Failed to create user')
+      try {
+        const data = await res.json()
+        setError(data.error ?? 'Failed to create user')
+      } catch {
+        setError('Failed to create user')
+      }
       return
     }
     setEmail('')

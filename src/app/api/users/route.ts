@@ -16,9 +16,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const deny = await requireAuth(req)
   if (deny) return deny
-  const { email, password, name } = await req.json()
-  if (!email || !password) return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
-  const hash = await bcrypt.hash(password, 12)
-  const user = await prisma.user.create({ data: { email, password: hash, name: name ?? null } })
-  return NextResponse.json({ id: user.id, email: user.email, name: user.name }, { status: 201 })
+  try {
+    const { email, password, name } = await req.json()
+    if (!email || !password) return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
+    const hash = await bcrypt.hash(password, 12)
+    const user = await prisma.user.create({ data: { email, password: hash, name: name ?? null } })
+    return NextResponse.json({ id: user.id, email: user.email, name: user.name }, { status: 201 })
+  } catch (e: any) {
+    const msg = e?.code === 'P2002' ? 'A user with that email already exists' : 'Failed to create user'
+    return NextResponse.json({ error: msg }, { status: 400 })
+  }
 }
