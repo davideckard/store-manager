@@ -30,6 +30,7 @@ COPY worker/ ./worker/
 
 ENV PATH="/venv/bin:$PATH"
 ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
 ENV JOBS_DIR=/data/jobs
 ENV NEXT_TELEMETRY_DISABLED=1
 
