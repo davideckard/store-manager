@@ -50,6 +50,7 @@ npx prisma migrate deploy || {
 
 echo "Starting Next.js server..."
 exec node /app/server.js
+echo "Stopped"
 EOF
 
 RUN chmod +x /app/start.sh
