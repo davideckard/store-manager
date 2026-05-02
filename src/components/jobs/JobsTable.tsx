@@ -28,6 +28,7 @@ function fmt(iso: string | null) {
 export function JobsTable({ jobs, selectedId, onSelect, onRefresh }: Props) {
   const [confirmJob, setConfirmJob] = useState<Job | null>(null)
   const [confirmType, setConfirmType] = useState<'remove' | 'cancel' | 'fix'>('remove')
+  const [confirmClearAll, setConfirmClearAll] = useState(false)
 
   function ask(job: Job, type: typeof confirmType) {
     setConfirmJob(job)
@@ -65,9 +66,24 @@ export function JobsTable({ jobs, selectedId, onSelect, onRefresh }: Props) {
     fix:    { title: 'Fix issues', message: 'Start a fix job using this audit report? It will delete and re-upload all incomplete products.', label: 'Start Fix', danger: false },
   }[confirmType]
 
+  async function clearAll() {
+    await fetch('/api/jobs', { method: 'DELETE' })
+    setConfirmClearAll(false)
+    onRefresh()
+  }
+
   return (
     <>
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+        <div className="flex justify-end px-3 py-2 border-b border-slate-100">
+          <button
+            onClick={() => setConfirmClearAll(true)}
+            disabled={jobs.length === 0}
+            className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium disabled:opacity-40"
+          >
+            Clear All
+          </button>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100">
@@ -129,6 +145,15 @@ export function JobsTable({ jobs, selectedId, onSelect, onRefresh }: Props) {
         danger={confirmConfig.danger}
         onConfirm={handleConfirm}
         onCancel={() => setConfirmJob(null)}
+      />
+      <ConfirmModal
+        open={confirmClearAll}
+        title="Clear all jobs"
+        message="Remove all jobs from the list? This cannot be undone."
+        confirmLabel="Clear All"
+        danger
+        onConfirm={clearAll}
+        onCancel={() => setConfirmClearAll(false)}
       />
     </>
   )

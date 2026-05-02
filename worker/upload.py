@@ -68,11 +68,23 @@ logger.addHandler(_fh)
 # ---------------------------------------------------------------------------
 # Image helpers
 # ---------------------------------------------------------------------------
-def _to_webp(raw_bytes: bytes) -> bytes:
-    """Convert raw image bytes (any format) to WebP at IMAGE_WEBP_QUALITY."""
+def _to_webp(raw_bytes: bytes, square_pad: bool = False) -> bytes:
+    """Convert raw image bytes (any format) to WebP at IMAGE_WEBP_QUALITY.
+
+    If square_pad is True the image is centered on a square canvas whose side
+    equals the longest dimension, with transparent padding on the shorter sides.
+    """
     img = Image.open(BytesIO(raw_bytes))
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGBA")
+
+    if square_pad:
+        w, h = img.size
+        side = max(w, h)
+        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        canvas.paste(img, ((side - w) // 2, (side - h) // 2))
+        img = canvas
+
     out = BytesIO()
     img.save(out, format="webp", quality=IMAGE_WEBP_QUALITY, method=6)
     return out.getvalue()
@@ -383,7 +395,7 @@ def is_file_in_media_lib(site, filename):
     return {}
 
 
-def upload_image_from_url(site, mockup_url):
+def upload_image_from_url(site, mockup_url, square_pad=False):
     """
     Download a mockup image from the catalog server and upload it to WordPress.
 
@@ -438,7 +450,7 @@ def upload_image_from_url(site, mockup_url):
 
         # Convert to WebP
         try:
-            upload_bytes = _to_webp(img_resp.content)
+            upload_bytes = _to_webp(img_resp.content, square_pad=square_pad)
         except Exception as e:
             logger.warning("WebP conversion failed for '%s', uploading original: %s", filename, e)
             upload_bytes = img_resp.content
@@ -469,7 +481,7 @@ def upload_image_from_url(site, mockup_url):
 # ---------------------------------------------------------------------------
 # Product uploader
 # ---------------------------------------------------------------------------
-def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False):
+def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False):
     """Create or update a variable product with all its variations."""
     name = product_data["name"]
     sku = product_data["sku"]
@@ -564,7 +576,7 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
     if _first_mockups:
         _m = _first_mockups[0]
         first_mockup_url = _m["urlpath"] if isinstance(_m, dict) else _m
-        media = upload_image_from_url(site, first_mockup_url)
+        media = upload_image_from_url(site, first_mockup_url, square_pad=square_pad)
         if media:
             parent_images.append({"id": media["id"]})
 
@@ -643,7 +655,7 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
         var_image = None
         for mockup in v.get("mockups", v.get("mockupUrls", [])):
             mockup_url = mockup["urlpath"] if isinstance(mockup, dict) else mockup
-            media = upload_image_from_url(site, mockup_url)
+            media = upload_image_from_url(site, mockup_url, square_pad=square_pad)
             if media:
                 var_image = {"id": media["id"]}
                 break
@@ -1559,6 +1571,11 @@ def main():
         help="Read orderboard Store ID and URL from a previous audit/fix report; CLI args override",
     )
     parser.add_argument(
+        "--square-pad",
+        action="store_true",
+        help="Center each image on a square canvas (longest side) before uploading",
+    )
+    parser.add_argument(
         "--filter-skus",
         default=None,
         metavar="SKUS",
@@ -1679,7 +1696,7 @@ def main():
 
     def worker(product):
         wcapi = get_wcapi(site)  # one client per thread
-        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors, force=args.force)
+        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors, force=args.force, square_pad=args.square_pad)
         return product["name"]
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:

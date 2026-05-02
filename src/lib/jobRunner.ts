@@ -45,6 +45,7 @@ function buildArgs(params: Record<string, unknown>): { args: string[]; env: Reco
   else if (mode === 'fix') args.push('--fix', '--fix-file', 'report.txt')
 
   if (params.force && mode === 'upload') args.push('--force')
+  if (params.squarePad && mode === 'upload') args.push('--square-pad')
 
   if (params.filterSkus && (params.filterSkus as string[]).length > 0)
     args.push('--filter-skus', (params.filterSkus as string[]).join(','))

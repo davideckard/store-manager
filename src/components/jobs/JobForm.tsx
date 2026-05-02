@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Site, Store, Job } from './types'
 import { ProductPickerModal } from '@/components/modals/ProductPickerModal'
+import { UploadSettingsModal, UploadSettings } from '@/components/modals/UploadSettingsModal'
 
 interface Props {
   onSubmitted: (id: string) => void
@@ -14,13 +15,16 @@ interface Product {
   name: string
 }
 
+const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true }
+
 export function JobForm({ onSubmitted, auditJobs }: Props) {
   const [sites, setSites] = useState<Site[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [siteId, setSiteId] = useState('')
   const [mode, setMode] = useState<'upload' | 'audit' | 'fix'>('upload')
   const [storeId, setStoreId] = useState('')
-  const [force, setForce] = useState(false)
+  const [settings, setSettings] = useState<UploadSettings>(DEFAULT_SETTINGS)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [fromAuditJob, setFromAuditJob] = useState('')
   const [selectProducts, setSelectProducts] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -82,7 +86,11 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
     const res = await fetch('/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId, mode, storeId, force, fromAuditJob, filterSkus }),
+      body: JSON.stringify({
+        siteId, mode, storeId, fromAuditJob, filterSkus,
+        force: settings.force,
+        squarePad: settings.squarePad,
+      }),
     })
     setSubmitting(false)
 
@@ -99,6 +107,8 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
     setPickerOpen(false)
     doSubmit(selectedSkus)
   }
+
+  const activeSettings = Object.values(settings).filter(Boolean).length
 
   return (
     <>
@@ -126,13 +136,6 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
           {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
 
-        {mode === 'upload' && (
-          <label className="flex items-center gap-2 mb-3 text-sm text-slate-600 cursor-pointer">
-            <input type="checkbox" checked={force} onChange={e => setForce(e.target.checked)} className="rounded" />
-            Force delete &amp; re-create
-          </label>
-        )}
-
         {mode === 'upload' && storeId && (
           <label className="flex items-center gap-2 mb-3 text-sm text-slate-600 cursor-pointer">
             <input type="checkbox" checked={selectProducts} onChange={e => setSelectProducts(e.target.checked)} className="rounded" />
@@ -152,10 +155,33 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
           </>
         )}
 
-        <button type="submit" disabled={submitting} className="w-full py-2 bg-[#692a77] text-white text-sm font-medium rounded-lg hover:bg-[#5a2368] disabled:opacity-60">
-          {submitting ? (selectProducts ? 'Fetching products…' : 'Submitting…') : (selectProducts ? 'Fetch & Select Products' : 'Submit Job')}
-        </button>
+        <div className="flex gap-2 mt-1">
+          <button type="submit" disabled={submitting} className="flex-1 py-2 bg-[#692a77] text-white text-sm font-medium rounded-lg hover:bg-[#5a2368] disabled:opacity-60">
+            {submitting ? (selectProducts ? 'Fetching products…' : 'Submitting…') : (selectProducts ? 'Fetch & Select Products' : 'Submit Job')}
+          </button>
+          {mode === 'upload' && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                activeSettings > 0
+                  ? 'bg-[#f3eaf5] border-[#692a77] text-[#692a77]'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+              title="Upload settings"
+            >
+              ⚙{activeSettings > 0 ? ` (${activeSettings})` : ''}
+            </button>
+          )}
+        </div>
       </form>
+
+      <UploadSettingsModal
+        open={settingsOpen}
+        settings={settings}
+        onChange={setSettings}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       <ProductPickerModal
         open={pickerOpen}
