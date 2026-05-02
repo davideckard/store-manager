@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 const links = [
   { href: '/sites', label: 'WooCommerce Stores' },
   { href: '/jobs', label: 'Upload Store' },
-  
+  { href: '/utilities', label: 'Utilities' },
 ]
 
 export default function NavLinks() {
