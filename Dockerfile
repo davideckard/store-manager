@@ -55,5 +55,5 @@ EOF
 
 RUN chmod +x /app/start.sh
 
-EXPOSE 3000
+EXPOSE 8080
 CMD ["/app/start.sh"]
