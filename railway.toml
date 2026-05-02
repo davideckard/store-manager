@@ -1,3 +1,6 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "mkdir -p /data/jobs && node server.js"
