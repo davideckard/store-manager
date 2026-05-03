@@ -531,19 +531,30 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
 
     # Collect unique values used by this product's variations
     colors_used = {}   # sku -> {name, slug}
-    fits_used = {}
     sizes_used = []    # ordered list of unique sizes
 
+    fits_skus_in_product = set()
     for v in variations:
         cs = v["colorSku"]
         if cs not in colors_used:
             colors_used[cs] = color_by_sku.get(cs, {"name": cs, "slug": cs.lower()})
-        fs = v["fitSku"]
-        if fs not in fits_used:
-            fits_used[fs] = fit_by_sku.get(fs, {"name": fs, "slug": fs.lower()})
+        fits_skus_in_product.add(v["fitSku"])
         sz = v["size"]
         if sz not in sizes_used:
             sizes_used.append(sz)
+
+    # Build fits_used in fit_mappings order so WooCommerce options respect orderboard sequence
+    fits_used = {}
+    for fm in fit_mappings:
+        if fm["sku"] in fits_skus_in_product:
+            fits_used[fm["sku"]] = fit_by_sku.get(fm["sku"], {"name": fm["name"], "slug": fm["sku"].lower()})
+    # Append any fits not covered by fit_mappings (fallback)
+    for v in variations:
+        fs = v["fitSku"]
+        if fs not in fits_used:
+            fits_used[fs] = {"name": fs, "slug": fs.lower()}
+
+    fit_order = {sku: i for i, sku in enumerate(fits_used)}
 
     # --- Ensure global attributes exist ---
     color_attr = ensure_global_attribute(wcapi, woo_attrs, "Color")
@@ -694,9 +705,14 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
                 var_image = {"id": media["id"]}
                 break
 
+        # menu_order: fit position drives primary sort so WooCommerce lists fits in orderboard order
+        size_index = SIZES_ORDER.index(size.upper()) if size.upper() in SIZES_ORDER else 999
+        var_menu_order = fit_order.get(v["fitSku"], 999) * 10000 + size_index
+
         var_payload = {
             "sku": v_sku,
             "regular_price": f"{float(price):.2f}",
+            "menu_order": var_menu_order,
             "attributes": var_attrs,
             "meta_data": [
                 {"key": "blank", "value": blank_meta},
@@ -780,6 +796,28 @@ def reorder_sizes(wcapi):
                 logger.error("Failed to reorder size '%s': %s", term["name"], resp.text)
             else:
                 logger.info("Set size '%s' order to %d", term["name"], menu_order)
+
+
+def reorder_fits(wcapi, fit_mappings):
+    """Set menu_order on Fit attribute terms to match fit_mappings order from orderboard."""
+    all_attrs = fetch_paginated(wcapi, "products/attributes")
+    fit_attr = next((a for a in all_attrs if a["name"].lower() == "fit"), None)
+    if not fit_attr:
+        return
+    fit_order = {fm["sku"].lower(): i + 1 for i, fm in enumerate(fit_mappings)}
+    terms = fetch_paginated(wcapi, f"products/attributes/{fit_attr['id']}/terms")
+    for term in terms:
+        menu_order = fit_order.get(term["slug"].lower(), 99)
+        if term.get("menu_order") != menu_order:
+            resp = _retry(wcapi.put,
+                f"products/attributes/{fit_attr['id']}/terms/{term['id']}",
+                {"menu_order": menu_order},
+                label=f"reorder fit {term['name']}",
+            )
+            if resp.status_code != 200:
+                logger.error("Failed to reorder fit '%s': %s", term["name"], resp.text)
+            else:
+                logger.info("Set fit '%s' order to %d", term["name"], menu_order)
 
 
 def assign_category_images(wcapi):
@@ -1789,6 +1827,7 @@ def main():
     # Post-upload housekeeping (single-threaded, order matters)
     logger.info("Running post-upload tasks...")
     reorder_sizes(main_wcapi)
+    reorder_fits(main_wcapi, fit_mappings)
     update_color_swatches(main_wcapi, site, color_mappings)
     if run_set_category_images:
         assign_category_images(main_wcapi)
