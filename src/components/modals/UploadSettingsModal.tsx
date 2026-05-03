@@ -6,6 +6,7 @@ export interface UploadSettings {
   force: boolean
   squarePad: boolean
   randomizeImage: boolean
+  setCategoryImages: boolean
 }
 
 interface Props {
@@ -13,9 +14,10 @@ interface Props {
   settings: UploadSettings
   onChange: (s: UploadSettings) => void
   onClose: () => void
+  isPartialUpload?: boolean
 }
 
-export function UploadSettingsModal({ open, settings, onChange, onClose }: Props) {
+export function UploadSettingsModal({ open, settings, onChange, onClose, isPartialUpload }: Props) {
   function set(patch: Partial<UploadSettings>) {
     onChange({ ...settings, ...patch })
   }
@@ -68,6 +70,25 @@ export function UploadSettingsModal({ open, settings, onChange, onClose }: Props
                 <p className="text-sm font-medium text-slate-700">Randomize Product Image</p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Pick the product thumbnail from a random variation instead of always using the first.
+                </p>
+              </div>
+            </label>
+
+            <label className={`flex items-start gap-3 ${isPartialUpload ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+              <input
+                type="checkbox"
+                checked={settings.setCategoryImages}
+                onChange={e => set({ setCategoryImages: e.target.checked })}
+                className="rounded mt-0.5"
+                disabled={isPartialUpload}
+              />
+              <div>
+                <p className="text-sm font-medium text-slate-700">
+                  Set Category Images from Products
+                  {isPartialUpload && <span className="ml-2 text-xs font-normal text-slate-400">(N/A — partial upload)</span>}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  After a full upload, assign a random product image to each category.
                 </p>
               </div>
             </label>

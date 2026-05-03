@@ -15,7 +15,7 @@ interface Product {
   name: string
 }
 
-const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true, randomizeImage: true }
+const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true, randomizeImage: true, setCategoryImages: true }
 
 export function JobForm({ onSubmitted, auditJobs }: Props) {
   const [sites, setSites] = useState<Site[]>([])
@@ -91,6 +91,7 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
         force: settings.force,
         squarePad: settings.squarePad,
         randomizeImage: settings.randomizeImage,
+        setCategoryImages: settings.setCategoryImages,
       }),
     })
     setSubmitting(false)
@@ -182,6 +183,7 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
         settings={settings}
         onChange={setSettings}
         onClose={() => setSettingsOpen(false)}
+        isPartialUpload={selectProducts}
       />
 
       <ProductPickerModal

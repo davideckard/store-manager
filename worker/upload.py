@@ -100,6 +100,8 @@ _image_cache: dict = {}          # filename -> media dict (populated on first up
 _image_locks: dict = {}          # filename -> per-file Lock
 _image_locks_guard = threading.Lock()  # protects _image_locks dict itself
 _orderboard_sem = threading.Semaphore(3)  # caps concurrent orderboard image downloads
+_category_media: dict = {}       # category_id (int) -> [media_id, ...] collected during upload
+_category_media_lock = threading.Lock()
 
 
 def _image_lock_for(filename: str) -> threading.Lock:
@@ -501,7 +503,7 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
 # ---------------------------------------------------------------------------
 # Product uploader
 # ---------------------------------------------------------------------------
-def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False, randomize_image=False):
+def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False, randomize_image=False, set_category_images=False):
     """Create or update a variable product with all its variations."""
     name = product_data["name"]
     sku = product_data["sku"]
@@ -607,6 +609,10 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
         media = upload_image_from_url(site, first_mockup_url, square_pad=square_pad, force=force)
         if media:
             parent_images.append({"id": media["id"]})
+            if set_category_images:
+                with _category_media_lock:
+                    for cat in category_ids:
+                        _category_media.setdefault(cat["id"], []).append(media["id"])
 
     # --- Create or update parent variable product ---
     parent_payload = {
@@ -774,6 +780,25 @@ def reorder_sizes(wcapi):
                 logger.error("Failed to reorder size '%s': %s", term["name"], resp.text)
             else:
                 logger.info("Set size '%s' order to %d", term["name"], menu_order)
+
+
+def assign_category_images(wcapi):
+    """Set a random uploaded product image on each category that had products uploaded."""
+    if not _category_media:
+        logger.info("No category image data collected; skipping category image assignment.")
+        return
+    logger.info("Assigning images to %d category/categories...", len(_category_media))
+    for cat_id, media_ids in _category_media.items():
+        chosen = random.choice(media_ids)
+        try:
+            resp = _retry(wcapi.put, f"products/categories/{cat_id}", {"image": {"id": chosen}},
+                          label=f"set category {cat_id} image")
+            if resp.status_code in (200, 201):
+                logger.info("Category %d image set to media ID %d", cat_id, chosen)
+            else:
+                logger.error("Failed to set category %d image: HTTP %d — %s", cat_id, resp.status_code, resp.text)
+        except Exception as e:
+            logger.error("Exception setting category %d image: %s", cat_id, e)
 
 
 def update_color_swatches(wcapi, site, color_mappings):
@@ -1609,6 +1634,11 @@ def main():
         help="Pick the parent product image from a random variation instead of always the first",
     )
     parser.add_argument(
+        "--set-category-images",
+        action="store_true",
+        help="After a full upload, assign a random product image to each category (skipped for partial uploads)",
+    )
+    parser.add_argument(
         "--filter-skus",
         default=None,
         metavar="SKUS",
@@ -1681,10 +1711,10 @@ def main():
     products = data.get("products", [])
 
     logger.info(
-        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s  randomize_image: %s",
+        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s  randomize_image: %s  set_category_images: %s",
         len(products), SITE_ID, site["url"],
         "audit" if args.audit else ("fix" if args.fix else "upload"),
-        args.force, args.square_pad, args.randomize_image,
+        args.force, args.square_pad, args.randomize_image, args.set_category_images,
     )
 
     main_wcapi = get_wcapi(site)
@@ -1722,9 +1752,10 @@ def main():
         )
         return
 
-    # Clear image cache before starting so stale entries from any previous run don't persist
+    # Clear per-run state before starting
     _image_cache.clear()
     _image_locks.clear()
+    _category_media.clear()
 
     # Pre-create all attributes and terms before threads start
     woo_attrs = preflight(main_wcapi, data)
@@ -1738,9 +1769,13 @@ def main():
         logger.info("Filtered to %d product(s) by --filter-skus", len(buildable))
     logger.info("Uploading %d products with %d workers...", len(buildable), MAX_WORKERS)
 
+    run_set_category_images = args.set_category_images and not args.filter_skus
+
     def worker(product):
         wcapi = get_wcapi(site)  # one client per thread
-        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors, force=args.force, square_pad=args.square_pad, randomize_image=args.randomize_image)
+        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors,
+                       force=args.force, square_pad=args.square_pad, randomize_image=args.randomize_image,
+                       set_category_images=run_set_category_images)
         return product["name"]
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -1755,6 +1790,8 @@ def main():
     logger.info("Running post-upload tasks...")
     reorder_sizes(main_wcapi)
     update_color_swatches(main_wcapi, site, color_mappings)
+    if run_set_category_images:
+        assign_category_images(main_wcapi)
 
     logger.info("Upload complete!")
 
