@@ -30,7 +30,7 @@ export async function DELETE() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { siteId, mode, storeId, orderboardUrl, force, squarePad, fromAuditJob, filterSkus, email, password } = body
+    const { siteId, mode, storeId, orderboardUrl, force, squarePad, randomizeImage, fromAuditJob, filterSkus, email, password } = body
 
     if (!['upload', 'audit', 'fix'].includes(mode))
       return NextResponse.json({ error: 'mode must be upload, audit, or fix' }, { status: 400 })
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       )
 
-    const safeParams = { siteId, mode, storeId, orderboardUrl, force, squarePad, fromAuditJob, filterSkus }
+    const safeParams = { siteId, mode, storeId, orderboardUrl, force, squarePad, randomizeImage, fromAuditJob, filterSkus }
     const job = await prisma.job.create({
       data: { siteId, mode, params: JSON.stringify(safeParams), status: 'pending' },
     })

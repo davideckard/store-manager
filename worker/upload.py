@@ -22,6 +22,8 @@ Optional environment variables:
 
 import argparse
 import base64
+import hashlib
+import random
 import datetime
 import getpass
 import json
@@ -31,6 +33,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
 from io import BytesIO
 
 import requests
@@ -413,10 +416,10 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
     else:
         full_url = ORDERBOARD_BASE_URL.rstrip("/") + mockup_url
 
-    # Build a stable filename — always .webp since we convert on upload
-    path_part = mockup_url.split("?")[0]
-    parts = [p for p in path_part.strip("/").split("/") if p]
-    filename = "_".join(parts[-2:]) + ".webp" if len(parts) >= 2 else "mockup.webp"
+    # Build a stable filename using an MD5 of the URL path (scheme/domain/query
+    # excluded) so filenames are short, unique, and collision-free.
+    path_only = urlparse(mockup_url).path
+    filename = hashlib.md5(path_only.encode()).hexdigest() + ".webp"
 
     # Ask the server for a pre-resized image to minimise download size
     if IMAGE_MAX_WIDTH > 0:
@@ -498,7 +501,7 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
 # ---------------------------------------------------------------------------
 # Product uploader
 # ---------------------------------------------------------------------------
-def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False):
+def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False, randomize_image=False):
     """Create or update a variable product with all its variations."""
     name = product_data["name"]
     sku = product_data["sku"]
@@ -587,12 +590,20 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
     category_ids = ensure_categories(wcapi, product_data.get("categories", []))
     tag_ids = ensure_tags(wcapi, product_data.get("tags", []))
 
-    # --- Upload parent product image (first mockup of first variation) ---
+    # --- Upload parent product image ---
     parent_images = []
-    _first_mockups = variations[0].get("mockups") or variations[0].get("mockupUrls") or []
-    if _first_mockups:
-        _m = _first_mockups[0]
-        first_mockup_url = _m["urlpath"] if isinstance(_m, dict) else _m
+    if randomize_image:
+        # Collect all mockups across all variations, pick one at random
+        all_mockups = []
+        for v in variations:
+            for m in (v.get("mockups") or v.get("mockupUrls") or []):
+                all_mockups.append(m)
+        _parent_mockup = random.choice(all_mockups) if all_mockups else None
+    else:
+        _first_mockups = variations[0].get("mockups") or variations[0].get("mockupUrls") or []
+        _parent_mockup = _first_mockups[0] if _first_mockups else None
+    if _parent_mockup is not None:
+        first_mockup_url = _parent_mockup["urlpath"] if isinstance(_parent_mockup, dict) else _parent_mockup
         media = upload_image_from_url(site, first_mockup_url, square_pad=square_pad, force=force)
         if media:
             parent_images.append({"id": media["id"]})
@@ -1164,7 +1175,7 @@ def audit_store(wcapi, site, data, output_file,
 
 
 def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalog_colors, output_file,
-              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None, square_pad=False):
+              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None, square_pad=False, randomize_image=False):
     """
     Audit the store, then for each product with hard issues delete it from
     WooCommerce and re-upload it fresh. Missing products are uploaded normally.
@@ -1218,7 +1229,7 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
             fix_lines.append(f"  [FAIL]    [{ep['sku']}] {ep['name']} — delete failed HTTP {resp.status_code}")
             continue
         try:
-            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad)
+            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad, randomize_image=randomize_image)
             fixed.append(ep)
             fix_lines.append(f"  [FIXED]   [{ep['sku']}] {ep['name']}")
             logger.info("Re-uploaded '%s' successfully.", ep["name"])
@@ -1233,7 +1244,7 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
     for ep in gathered["missing"]:
         logger.info("Uploading missing product '%s'...", ep["name"])
         try:
-            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad)
+            upload_product(wcapi, site, woo_attrs, ep, color_mappings, fit_mappings, catalog_colors, square_pad=square_pad, randomize_image=randomize_image)
             uploaded_new.append(ep)
             fix_lines.append(f"  [UPLOADED] [{ep['sku']}] {ep['name']}")
             logger.info("Uploaded '%s' successfully.", ep["name"])
@@ -1593,6 +1604,11 @@ def main():
         help="Center each image on a square canvas (longest side) before uploading",
     )
     parser.add_argument(
+        "--randomize-image",
+        action="store_true",
+        help="Pick the parent product image from a random variation instead of always the first",
+    )
+    parser.add_argument(
         "--filter-skus",
         default=None,
         metavar="SKUS",
@@ -1665,10 +1681,10 @@ def main():
     products = data.get("products", [])
 
     logger.info(
-        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s",
+        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s  randomize_image: %s",
         len(products), SITE_ID, site["url"],
         "audit" if args.audit else ("fix" if args.fix else "upload"),
-        args.force, args.square_pad,
+        args.force, args.square_pad, args.randomize_image,
     )
 
     main_wcapi = get_wcapi(site)
@@ -1702,6 +1718,7 @@ def main():
             orderboard_url=ob_url,
             filter_skus=filter_skus,
             square_pad=args.square_pad,
+            randomize_image=args.randomize_image,
         )
         return
 
@@ -1723,7 +1740,7 @@ def main():
 
     def worker(product):
         wcapi = get_wcapi(site)  # one client per thread
-        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors, force=args.force, square_pad=args.square_pad)
+        upload_product(wcapi, site, woo_attrs, product, color_mappings, fit_mappings, catalog_colors, force=args.force, square_pad=args.square_pad, randomize_image=args.randomize_image)
         return product["name"]
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:

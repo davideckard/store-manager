@@ -15,7 +15,7 @@ interface Product {
   name: string
 }
 
-const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true }
+const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true, randomizeImage: true }
 
 export function JobForm({ onSubmitted, auditJobs }: Props) {
   const [sites, setSites] = useState<Site[]>([])
@@ -90,6 +90,7 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
         siteId, mode, storeId, fromAuditJob, filterSkus,
         force: settings.force,
         squarePad: settings.squarePad,
+        randomizeImage: settings.randomizeImage,
       }),
     })
     setSubmitting(false)

@@ -46,6 +46,7 @@ function buildArgs(params: Record<string, unknown>): { args: string[]; env: Reco
 
   if (params.force && mode === 'upload') args.push('--force')
   if (params.squarePad && mode === 'upload') args.push('--square-pad')
+  if (params.randomizeImage && mode === 'upload') args.push('--randomize-image')
 
   if (params.filterSkus && (params.filterSkus as string[]).length > 0)
     args.push('--filter-skus', (params.filterSkus as string[]).join(','))
