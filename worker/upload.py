@@ -395,7 +395,7 @@ def is_file_in_media_lib(site, filename):
     return {}
 
 
-def upload_image_from_url(site, mockup_url, square_pad=False):
+def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
     """
     Download a mockup image from the catalog server and upload it to WordPress.
 
@@ -404,6 +404,9 @@ def upload_image_from_url(site, mockup_url, square_pad=False):
 
     A per-filename lock ensures that concurrent workers never upload the same
     image more than once; subsequent callers receive the cached media dict.
+
+    When force=True the existing media library entry is deleted before re-uploading,
+    ensuring the image is replaced rather than deduplicated.
     """
     if mockup_url.startswith("http"):
         full_url = mockup_url
@@ -420,7 +423,7 @@ def upload_image_from_url(site, mockup_url, square_pad=False):
         sep = "&" if "?" in full_url else "?"
         full_url = f"{full_url}{sep}width={IMAGE_MAX_WIDTH}"
 
-    # Fast path: already resolved by another worker this session
+    # Fast path: already uploaded this session — always reuse regardless of force
     if filename in _image_cache:
         logger.info("Image '%s' reusing cached ID %d", filename, _image_cache[filename]["id"])
         return _image_cache[filename]
@@ -435,9 +438,23 @@ def upload_image_from_url(site, mockup_url, square_pad=False):
         # Check WordPress media library
         existing = is_file_in_media_lib(site, filename)
         if existing:
-            logger.info("Image '%s' already in media library (ID: %d)", filename, existing["id"])
-            _image_cache[filename] = existing
-            return existing
+            if not force:
+                logger.info("Image '%s' already in media library (ID: %d)", filename, existing["id"])
+                _image_cache[filename] = existing
+                return existing
+            # force=True: delete the existing entry so we can re-upload fresh
+            logger.info("Force re-upload: deleting existing image '%s' (ID: %d)", filename, existing["id"])
+            try:
+                _retry(
+                    requests.delete,
+                    f"{site['url']}/wp-json/wp/v2/media/{existing['id']}",
+                    params={"force": True},
+                    headers=wp_auth_headers(site),
+                    timeout=30,
+                    label=f"delete media {filename}",
+                )
+            except Exception as e:
+                logger.warning("Could not delete existing media '%s': %s", filename, e)
 
         # Download — semaphore caps concurrent orderboard requests
         with _orderboard_sem:
@@ -576,7 +593,7 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
     if _first_mockups:
         _m = _first_mockups[0]
         first_mockup_url = _m["urlpath"] if isinstance(_m, dict) else _m
-        media = upload_image_from_url(site, first_mockup_url, square_pad=square_pad)
+        media = upload_image_from_url(site, first_mockup_url, square_pad=square_pad, force=force)
         if media:
             parent_images.append({"id": media["id"]})
 
@@ -655,7 +672,7 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
         var_image = None
         for mockup in v.get("mockups", v.get("mockupUrls", [])):
             mockup_url = mockup["urlpath"] if isinstance(mockup, dict) else mockup
-            media = upload_image_from_url(site, mockup_url, square_pad=square_pad)
+            media = upload_image_from_url(site, mockup_url, square_pad=square_pad, force=force)
             if media:
                 var_image = {"id": media["id"]}
                 break
@@ -1647,7 +1664,12 @@ def main():
     catalog_colors = {str(c["catalogColorId"]): c for c in data.get("catalogColors", [])}
     products = data.get("products", [])
 
-    logger.info("Products: %d  Site: %s  URL: %s", len(products), SITE_ID, site["url"])
+    logger.info(
+        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s",
+        len(products), SITE_ID, site["url"],
+        "audit" if args.audit else ("fix" if args.fix else "upload"),
+        args.force, args.square_pad,
+    )
 
     main_wcapi = get_wcapi(site)
 
@@ -1682,6 +1704,10 @@ def main():
             square_pad=args.square_pad,
         )
         return
+
+    # Clear image cache before starting so stale entries from any previous run don't persist
+    _image_cache.clear()
+    _image_locks.clear()
 
     # Pre-create all attributes and terms before threads start
     woo_attrs = preflight(main_wcapi, data)
