@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { SiteModal, SiteRecord } from '@/components/modals/SiteModal'
+import { StoreModal } from '@/components/modals/StoreModal'
 import { ConfirmModal } from '@/components/modals/ConfirmModal'
 
 type SortKey = 'name' | 'slug' | 'sku' | 'domain'
@@ -18,6 +19,7 @@ export function SitesTable() {
   const [editing, setEditing] = useState<SiteRecord | null>(null)
   const [copyFrom, setCopyFrom] = useState<SiteRecord | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SiteRecord | null>(null)
+  const [storeModalSite, setStoreModalSite] = useState<SiteRecord | null>(null)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/sites')
@@ -70,6 +72,8 @@ export function SitesTable() {
     setModalOpen(false)
     setEditing(null)
     setCopyFrom(null)
+    // Update storeModal site if it's the one being saved
+    if (storeModalSite && data.id === storeModalSite.id) setStoreModalSite(data)
     load()
   }
 
@@ -122,16 +126,20 @@ export function SitesTable() {
               <tr><td colSpan={5} className="text-center py-10 text-slate-400 text-sm">No sites found.</td></tr>
             )}
             {paged.map(s => (
-              <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50">
+              <tr
+                key={s.id}
+                className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
+                onDoubleClick={() => setStoreModalSite(s)}
+              >
                 <td className="px-3 py-2 font-medium">{s.name}</td>
                 <td className="px-3 py-2 text-slate-500">{s.slug}</td>
                 <td className="px-3 py-2 text-slate-500">{s.sku}</td>
                 <td className="px-3 py-2 text-slate-500">{s.domain}</td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => { setCopyFrom(s); setEditing(null); setModalOpen(true) }} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">Copy</button>
-                    <button onClick={() => { setEditing(s); setCopyFrom(null); setModalOpen(true) }} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">Edit</button>
-                    <button onClick={() => setDeleteTarget(s)} className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">Delete</button>
+                    <button onClick={e => { e.stopPropagation(); setCopyFrom(s); setEditing(null); setModalOpen(true) }} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">Copy</button>
+                    <button onClick={e => { e.stopPropagation(); setStoreModalSite(s) }} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">Edit</button>
+                    <button onClick={e => { e.stopPropagation(); setDeleteTarget(s) }} className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">Delete</button>
                   </div>
                 </td>
               </tr>
@@ -152,6 +160,12 @@ export function SitesTable() {
       )}
 
       <SiteModal open={modalOpen} initial={editing} copyFrom={copyFrom} onSave={save} onCancel={() => { setModalOpen(false); setEditing(null); setCopyFrom(null) }} />
+      <StoreModal
+        open={!!storeModalSite}
+        site={storeModalSite}
+        onSave={save}
+        onClose={() => setStoreModalSite(null)}
+      />
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete site"
