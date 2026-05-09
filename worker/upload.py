@@ -167,9 +167,9 @@ SIZES_ORDER = [
     "20OZ",
 ]
 
-# Image processing before upload
-IMAGE_MAX_WIDTH = 700    # width (px) requested from server; 0 = no resize
-IMAGE_WEBP_QUALITY = 85  # WebP quality 1–100; 85 is visually lossless for mockups
+# Image processing before up7load
+IMAGE_MAX_WIDTH = 600    # width (px) requested from server; 0 = no resize
+IMAGE_WEBP_QUALITY = 75  # WebP quality 1–100; 85 is visually lossless for mockups
 
 
 def load_site_config():
@@ -478,11 +478,12 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
             upload_bytes = img_resp.content
 
         # Upload to WordPress media library
+        wp_media_url = f"{site['url']}/wp-json/wp/v2/media"
         headers = wp_auth_headers(site, "image/webp")
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         try:
             res = _retry(requests.post,
-                f"{site['url']}/wp-json/wp/v2/media",
+                wp_media_url,
                 headers=headers,
                 data=upload_bytes,
                 timeout=120,
@@ -493,9 +494,18 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
                 _image_cache[filename] = media
                 logger.info("Uploaded image '%s' (ID: %d)", filename, media["id"])
                 return media
-            logger.error("Failed to upload image '%s': %s", filename, res.text)
+            body = res.text
+            content_type = res.headers.get("Content-Type", "")
+            if "html" in content_type.lower() or body.lstrip().startswith("<"):
+                excerpt = f"<HTML response, {len(body)} bytes>"
+            else:
+                excerpt = body[:500]
+            logger.error(
+                "Failed to upload image '%s' → %s : HTTP %d — %s",
+                filename, wp_media_url, res.status_code, excerpt,
+            )
         except Exception as e:
-            logger.error("Exception uploading image '%s': %s", filename, e)
+            logger.error("Exception uploading image '%s' → %s : %s", filename, wp_media_url, e)
 
     return None
 
