@@ -8,6 +8,8 @@ const JOBS_DIR = process.env.JOBS_DIR ?? '/data/jobs'
 
 // In-memory map of jobId → child process
 const runningProcs = new Map<string, ReturnType<typeof spawn>>()
+// Jobs killed intentionally — close handler marks these 'cancelled' not 'failed'
+const cancelledJobs = new Set<string>()
 
 export function jobDir(jobId: string) {
   return path.join(JOBS_DIR, jobId)
@@ -88,10 +90,11 @@ export async function runJob(jobId: string, params: Record<string, unknown>) {
   proc.on('close', async (code) => {
     fs.closeSync(logFd)
     runningProcs.delete(jobId)
+    const wasCancelled = cancelledJobs.delete(jobId)
     await prisma.job.update({
       where: { id: jobId },
       data: {
-        status: code === 0 ? 'complete' : 'failed',
+        status: wasCancelled ? 'cancelled' : (code === 0 ? 'complete' : 'failed'),
         finishedAt: new Date(),
         exitCode: code ?? -1,
       },
@@ -105,6 +108,15 @@ export function killJob(jobId: string) {
     proc.kill()
     runningProcs.delete(jobId)
   }
+}
+
+export function cancelJob(jobId: string): boolean {
+  const proc = runningProcs.get(jobId)
+  if (!proc) return false
+  cancelledJobs.add(jobId)
+  proc.kill()
+  runningProcs.delete(jobId)
+  return true
 }
 
 export function isRunning(jobId: string) {

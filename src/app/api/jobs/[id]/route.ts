@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { killJob, reportPath, reportHasIssues } from '@/lib/jobRunner'
+import { killJob, cancelJob, reportPath, reportHasIssues } from '@/lib/jobRunner'
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -14,6 +14,17 @@ export async function GET(_: NextRequest, { params }: Ctx) {
       hasReport: reportPath(id) !== null,
       hasIssues: reportHasIssues(id),
     })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
+}
+
+export async function PATCH(_: NextRequest, { params }: Ctx) {
+  try {
+    const { id } = await params
+    const stopped = cancelJob(id)
+    if (!stopped) return NextResponse.json({ error: 'Job not running' }, { status: 409 })
+    return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

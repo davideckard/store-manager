@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 const links = [
   { href: '/sites', label: 'WooCommerce Stores' },
   { href: '/jobs', label: 'Upload Store' },
+  { href: '/chat', label: 'Chat' },
   { href: '/utilities', label: 'Utilities' },
 ]
 

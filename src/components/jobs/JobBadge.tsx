@@ -1,10 +1,11 @@
 import { Job } from './types'
 
 const statusClasses: Record<Job['status'], string> = {
-  pending:  'bg-slate-100 text-slate-500',
-  running:  'bg-[#e8f4f8] text-[#2387a6] animate-pulse',
-  complete: 'bg-green-100 text-green-700',
-  failed:   'bg-red-100 text-red-700',
+  pending:   'bg-slate-100 text-slate-500',
+  running:   'bg-[#e8f4f8] text-[#2387a6] animate-pulse',
+  complete:  'bg-green-100 text-green-700',
+  failed:    'bg-red-100 text-red-700',
+  cancelled: 'bg-orange-100 text-orange-700',
 }
 
 const modeClasses: Record<Job['mode'], string> = {
