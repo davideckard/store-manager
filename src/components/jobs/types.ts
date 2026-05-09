@@ -3,7 +3,7 @@ export interface Job {
   siteId: string
   mode: 'upload' | 'audit' | 'fix'
   params: string
-  status: 'pending' | 'running' | 'complete' | 'failed'
+  status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled'
   createdAt: string
   startedAt: string | null
   finishedAt: string | null

@@ -37,7 +37,9 @@ export function JobsTable({ jobs, selectedId, onSelect, onRefresh }: Props) {
 
   async function handleConfirm() {
     if (!confirmJob) return
-    if (confirmType === 'remove' || confirmType === 'cancel') {
+    if (confirmType === 'cancel') {
+      await fetch(`/api/jobs/${confirmJob.id}`, { method: 'PATCH' })
+    } else if (confirmType === 'remove') {
       await fetch(`/api/jobs/${confirmJob.id}`, { method: 'DELETE' })
     } else if (confirmType === 'fix') {
       await fetch('/api/jobs', {
