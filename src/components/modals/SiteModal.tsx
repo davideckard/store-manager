@@ -42,7 +42,11 @@ export function SiteModal({ open, initial, copyFrom, onSave, onCancel }: Props) 
   const [form, setForm] = useState<SiteRecord>(EMPTY)
 
   useEffect(() => {
-    if (open) setForm(initial ?? copyFrom ?? EMPTY)
+    if (open) {
+      if (initial) setForm(initial)
+      else if (copyFrom) setForm({ ...copyFrom, id: undefined })
+      else setForm(EMPTY)
+    }
   }, [open, initial, copyFrom])
 
   const isEdit = !!initial?.id
