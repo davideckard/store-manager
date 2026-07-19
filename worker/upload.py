@@ -1423,7 +1423,7 @@ def _graphql(url: str, token: str, query: str, variables: dict) -> dict:
         f"{url}/api/graphql",
         json={"query": query, "variables": variables},
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        timeout=30,
+        timeout=120,
     )
     resp.raise_for_status()
     result = resp.json()
