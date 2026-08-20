@@ -1,7 +1,7 @@
 'use client'
 
 import { Dialog, DialogPanel } from '@headlessui/react'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { SiteRecord } from './SiteModal'
 import { ConfirmModal } from './ConfirmModal'
 
@@ -417,40 +417,38 @@ function ProductsPage({
 function SettingsPage({
   site,
   onSave,
+  onClose,
+  onFormReady,
 }: {
   site: SiteRecord
   onSave: (data: SiteRecord) => void
+  onClose: () => void
+  onFormReady: (submit: () => void) => void
 }) {
   const [form, setForm] = useState<SiteRecord>(site)
+
+  useEffect(() => {
+    onFormReady(() => { onSave(form); onClose() })
+  }, [form])
 
   function set(key: keyof SiteRecord, value: string) {
     setForm(f => ({ ...f, [key]: value }))
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="grid grid-cols-2 gap-3 overflow-y-auto flex-1">
-        {SITE_FIELDS.map(({ key, label, type }) => (
-          <div key={key} className="col-span-2 sm:col-span-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>
-            <input
-              type={type ?? 'text'}
-              value={String(form[key] ?? '')}
-              onChange={e => set(key, e.target.value)}
-              readOnly={key === 'slug'}
-              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#2387a6] focus:bg-white read-only:bg-slate-100 read-only:text-slate-400"
-            />
-          </div>
-        ))}
-      </div>
-      <div className="flex justify-end pt-4">
-        <button
-          onClick={() => onSave(form)}
-          className="px-4 py-2 rounded-lg bg-[#692a77] text-white text-sm font-medium hover:bg-[#5a2368]"
-        >
-          Save Settings
-        </button>
-      </div>
+    <div className="grid grid-cols-2 gap-3 overflow-y-auto h-full">
+      {SITE_FIELDS.map(({ key, label, type }) => (
+        <div key={key} className="col-span-2 sm:col-span-1">
+          <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>
+          <input
+            type={type ?? 'text'}
+            value={String(form[key] ?? '')}
+            onChange={e => set(key, e.target.value)}
+            readOnly={key === 'slug'}
+            className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#2387a6] focus:bg-white read-only:bg-slate-100 read-only:text-slate-400"
+          />
+        </div>
+      ))}
     </div>
   )
 }
@@ -472,6 +470,7 @@ export function StoreModal({ open, site, onSave, onClose }: StoreModalProps) {
   const [tab, setTab] = useState<Tab>('products')
   const [view, setView] = useState<View>('list')
   const [detailSelection, setDetailSelection] = useState<Selection | null>(null)
+  const submitSettingsRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (open) { setTab('products'); setView('list'); setDetailSelection(null) }
@@ -521,7 +520,30 @@ export function StoreModal({ open, site, onSave, onClose }: StoreModalProps) {
               <DetailPanel selection={detailSelection} onBack={() => setView('list')} />
             )}
             {tab === 'settings' && (
-              <SettingsPage site={site} onSave={onSave} />
+              <SettingsPage
+                site={site}
+                onSave={onSave}
+                onClose={onClose}
+                onFormReady={fn => { submitSettingsRef.current = fn }}
+              />
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100 flex-shrink-0">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200"
+            >
+              Cancel
+            </button>
+            {tab === 'settings' && (
+              <button
+                onClick={() => submitSettingsRef.current?.()}
+                className="px-4 py-2 rounded-lg bg-[#692a77] text-white text-sm font-medium hover:bg-[#5a2368]"
+              >
+                Save Settings
+              </button>
             )}
           </div>
         </DialogPanel>

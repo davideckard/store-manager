@@ -73,7 +73,7 @@ export function SitesTable() {
     setEditing(null)
     setCopyFrom(null)
     // Update storeModal site if it's the one being saved
-    if (storeModalSite && data.id === storeModalSite.id) setStoreModalSite(data)
+    setStoreModalSite(prev => prev?.id === data.id ? data : prev)
     load()
   }
 
