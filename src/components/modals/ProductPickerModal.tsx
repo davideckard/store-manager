@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 interface Product {
   sku: string
   name: string
+  excludeFromWebstore?: boolean
 }
 
 interface Props {
@@ -33,19 +34,20 @@ export function ProductPickerModal({ open, products, loading, onConfirm, onCance
     return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
   })
 
-  const allFilteredSelected = filtered.length > 0 && filtered.every(p => selected.has(p.sku))
+  const selectable = filtered.filter(p => !p.excludeFromWebstore)
+  const allFilteredSelected = selectable.length > 0 && selectable.every(p => selected.has(p.sku))
 
   function toggleAll() {
     if (allFilteredSelected) {
       setSelected(s => {
         const next = new Set(s)
-        filtered.forEach(p => next.delete(p.sku))
+        selectable.forEach(p => next.delete(p.sku))
         return next
       })
     } else {
       setSelected(s => {
         const next = new Set(s)
-        filtered.forEach(p => next.add(p.sku))
+        selectable.forEach(p => next.add(p.sku))
         return next
       })
     }
@@ -103,25 +105,32 @@ export function ProductPickerModal({ open, products, loading, onConfirm, onCance
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(p => (
-                    <tr
-                      key={p.sku}
-                      onClick={() => toggle(p.sku)}
-                      className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
-                    >
-                      <td className="px-4 py-2">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(p.sku)}
-                          onChange={() => toggle(p.sku)}
-                          onClick={e => e.stopPropagation()}
-                          className="rounded"
-                        />
-                      </td>
-                      <td className="px-3 py-2 font-medium text-slate-800">{p.name}</td>
-                      <td className="px-3 py-2 text-slate-400 font-mono text-xs">{p.sku}</td>
-                    </tr>
-                  ))}
+                  {filtered.map(p => {
+                    const excluded = !!p.excludeFromWebstore
+                    return (
+                      <tr
+                        key={p.sku}
+                        onClick={() => !excluded && toggle(p.sku)}
+                        className={`border-b border-slate-50 ${excluded ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'}`}
+                      >
+                        <td className="px-4 py-2">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(p.sku)}
+                            disabled={excluded}
+                            onChange={() => !excluded && toggle(p.sku)}
+                            onClick={e => e.stopPropagation()}
+                            className="rounded disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-medium text-slate-800">
+                          {p.name}
+                          {excluded && <span className="ml-2 text-xs font-normal text-slate-400 italic">excluded from webstore</span>}
+                        </td>
+                        <td className="px-3 py-2 text-slate-400 font-mono text-xs">{p.sku}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
@@ -129,7 +138,7 @@ export function ProductPickerModal({ open, products, loading, onConfirm, onCance
 
           <div className="p-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-sm text-slate-500">
-              {selected.size} of {products.length} selected
+              {selected.size} of {products.filter(p => !p.excludeFromWebstore).length} selected
             </span>
             <div className="flex gap-2">
               <button

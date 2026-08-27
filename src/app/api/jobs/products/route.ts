@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/apiAuth'
 interface ProductItem {
   sku: string
   name: string
+  excludeFromWebstore?: boolean
 }
 
 async function graphql(url: string, token: string, query: string, variables: Record<string, unknown>) {
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
         designGroups(storeId: $storeId) { id name sku }
         designerProducts(storeId: $storeId) { id name sku }
         designGroupProductMappings(storeId: $storeId) { designGroupId designerProductId }
-        products(storeId: $storeId) { id name productSku }
+        products(storeId: $storeId) { id name productSku excludeFromWebstore }
       }
     `, { storeId })
 
@@ -61,6 +62,12 @@ export async function POST(req: NextRequest) {
     for (const g of data.designGroups ?? []) groupById[g.id] = g
     const productById: Record<string, { name: string; sku: string }> = {}
     for (const p of data.designerProducts ?? []) productById[p.id] = p
+
+    // Build a SKU → excludeFromWebstore lookup from built products
+    const excludeBySku: Record<string, boolean> = {}
+    for (const mp of data.products ?? []) {
+      if (mp.productSku) excludeBySku[mp.productSku.trim().toUpperCase()] = !!mp.excludeFromWebstore
+    }
 
     const products: ProductItem[] = []
     const designerSkus = new Set<string>()
@@ -71,14 +78,15 @@ export async function POST(req: NextRequest) {
       if (!group || !product) continue
       const groupSkuPart = group.sku || group.name
       const sku = `${skuPrefix}-${groupSkuPart}-${product.sku}`
-      designerSkus.add(sku.trim().toUpperCase())
-      products.push({ sku, name: `${group.name} ${product.name}` })
+      const upperSku = sku.trim().toUpperCase()
+      designerSkus.add(upperSku)
+      products.push({ sku, name: `${group.name} ${product.name}`, excludeFromWebstore: excludeBySku[upperSku] ?? false })
     }
 
     for (const mp of data.products ?? []) {
       if (!mp.productSku) continue
       if (designerSkus.has(mp.productSku.trim().toUpperCase())) continue
-      products.push({ sku: mp.productSku, name: mp.name || mp.productSku })
+      products.push({ sku: mp.productSku, name: mp.name || mp.productSku, excludeFromWebstore: !!mp.excludeFromWebstore })
     }
 
     products.sort((a, b) => a.name.localeCompare(b.name))

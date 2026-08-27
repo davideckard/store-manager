@@ -1388,7 +1388,7 @@ def preflight(wcapi, data):
     fit_by_sku = {fm["sku"]: {"name": fm["name"], "slug": fm["sku"].lower()} for fm in fit_mappings}
 
     for p in products:
-        if p.get("built") is False or not p.get("variations"):
+        if p.get("built") is False or not p.get("variations") or p.get("excludeFromWebstore"):
             continue
         for v in p["variations"]:
             cs = v["colorSku"]
@@ -1529,6 +1529,7 @@ def _build_woo_export(raw: dict) -> dict:
             "categories": product.get("categories") or [],
             "tags": product.get("tags") or [],
             "built": bool(built),
+            "excludeFromWebstore": bool(built.get("excludeFromWebstore")) if built else False,
             "variations": export_variations,
         })
 
@@ -1545,6 +1546,7 @@ def _build_woo_export(raw: dict) -> dict:
             "categories": [],
             "tags": [],
             "built": True,
+            "excludeFromWebstore": bool(mp.get("excludeFromWebstore")),
             "variations": [_map_variation(v, use_mockup_urls=True) for v in sorted_vars],
         })
 
@@ -1589,7 +1591,7 @@ def fetch_from_orderboard(api_url: str, email: str, password: str, store_id: str
             id designGroupId designerProductId variationSkus colorPlacements
           }}
           products(storeId: $storeId) {{
-            id name productSku
+            id name productSku excludeFromWebstore
             variations {{
               sku price sizeOrder
               mappedFit {{ name sku }}
@@ -1810,7 +1812,7 @@ def main():
 
     # When fetching from the API, "built" is not present — all returned products are treated as ready.
     # When using a products.json file, "built" must be True to include the product.
-    buildable = [p for p in products if (args.api or p.get("built")) and p.get("variations")]
+    buildable = [p for p in products if (args.api or p.get("built")) and p.get("variations") and not p.get("excludeFromWebstore")]
     if args.filter_skus:
         allowed = {s.strip().upper() for s in args.filter_skus.split(",")}
         buildable = [p for p in buildable if p["sku"].strip().upper() in allowed]
