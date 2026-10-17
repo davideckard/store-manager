@@ -513,6 +513,151 @@ def upload_image_from_url(site, mockup_url, square_pad=False, force=False):
 # ---------------------------------------------------------------------------
 # Product uploader
 # ---------------------------------------------------------------------------
+_weight_unit_cache = {}
+_weight_unit_lock = threading.Lock()
+_GRAMS_PER_UNIT = {"kg": 1000.0, "g": 1.0, "lbs": 453.59237, "oz": 28.349523125}
+
+
+def _site_weight_unit(wcapi, site):
+    """The site's WooCommerce weight unit (kg, g, lbs or oz), fetched once per site."""
+    key = site.get("slug") or site.get("url") or "default"
+    with _weight_unit_lock:
+        if key not in _weight_unit_cache:
+            unit = "lbs"
+            resp = _retry(wcapi.get, "settings/products/woocommerce_weight_unit", label="fetch weight unit")
+            if resp.status_code == 200:
+                unit = resp.json().get("value") or unit
+            else:
+                logger.warning("Could not read the site weight unit (%s); assuming lbs", resp.status_code)
+            _weight_unit_cache[key] = unit
+        return _weight_unit_cache[key]
+
+
+def _weight_for_site(wcapi, site, grams):
+    """Orderboard weights are grams; WooCommerce wants a string in the site's unit."""
+    if not grams:
+        return None
+    unit = _site_weight_unit(wcapi, site)
+    return f"{float(grams) / _GRAMS_PER_UNIT.get(unit, _GRAMS_PER_UNIT['lbs']):.2f}"
+
+
+def _convert_simple_to_variable(wcapi, name, parent_sku, variation_skus):
+    """
+    Find a simple product stored under one of these variation SKUs (from when the product had a
+    single variation) and turn it into a variable product with the parent SKU. Returns the
+    updated product, or None when there's nothing to convert.
+    """
+    for v_sku in variation_skus:
+        if not v_sku:
+            continue
+        found = [p for p in fetch_paginated(wcapi, f"products?sku={v_sku}") if p.get("type") == "simple"]
+        if not found:
+            continue
+        product = found[0]
+        resp = _retry(wcapi.put, f"products/{product['id']}", {"type": "variable", "sku": parent_sku},
+                      label=f"convert simple to variable {name}")
+        if resp.status_code == 200:
+            logger.info("Converted simple product '%s' (ID: %d) to variable", name, product["id"])
+            return resp.json()
+        logger.error("Failed to convert simple product '%s' to variable: %s", name, resp.text)
+        return None
+    return None
+
+
+def upload_simple_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, force=False, square_pad=False, set_category_images=False):
+    """
+    Create or update a WooCommerce simple product for a product with exactly one variation.
+    Its SKU is the variation SKU, so ShipStation order lines resolve back to Orderboard. A
+    catalog-backed one shows its color/size/fit as visible, non-variation attributes.
+    """
+    name = product_data["name"]
+    v = product_data["variations"][0]
+    sku = v.get("sku") or product_data["sku"]
+    logger.info("=== Processing simple product: %s (%s) ===", name, sku)
+
+    # Informational attributes for catalog-backed items (e.g. "Color: Black, Size: L"); no dropdowns
+    color_by_sku = {cm["sku"]: cm["name"] for cm in color_mappings}
+    fit_by_sku = {fm["sku"]: fm["name"] for fm in fit_mappings}
+    attr_values = [
+        ("Fit", fit_by_sku.get(v.get("fitSku") or "", v.get("fitSku") or "")),
+        ("Color", color_by_sku.get(v.get("colorSku") or "", v.get("colorSku") or "")),
+        ("Size", v.get("size") or ""),
+    ]
+    attr_list = []
+    for position, (attr_name, value) in enumerate([a for a in attr_values if a[1]]):
+        attr = ensure_global_attribute(wcapi, woo_attrs, attr_name)
+        if attr:
+            attr_list.append({"id": attr["id"], "position": position, "visible": True, "variation": False, "options": [value]})
+
+    category_ids = ensure_categories(wcapi, product_data.get("categories", []))
+    tag_ids = ensure_tags(wcapi, product_data.get("tags", []))
+
+    # Image: the variation's catalog mockup when there is one, otherwise the product's own image
+    images = []
+    mockups = v.get("mockups") or v.get("mockupUrls") or []
+    image_url = (mockups[0]["urlpath"] if isinstance(mockups[0], dict) else mockups[0]) if mockups else product_data.get("image")
+    if image_url:
+        media = upload_image_from_url(site, image_url, square_pad=square_pad, force=force)
+        if media:
+            images.append({"id": media["id"]})
+            if set_category_images:
+                with _category_media_lock:
+                    for cat in category_ids:
+                        _category_media.setdefault(cat["id"], []).append(media["id"])
+
+    payload = {
+        "name": name,
+        "type": "simple",
+        "sku": sku,
+        "categories": category_ids,
+        "tags": tag_ids,
+        "attributes": attr_list,
+        "images": images,
+    }
+    if v.get("price") is not None:
+        payload["regular_price"] = f"{float(v['price']):.2f}"
+    weight = _weight_for_site(wcapi, site, v.get("weight"))
+    if weight:
+        payload["weight"] = weight
+    if product_data.get("description"):
+        payload["description"] = product_data["description"]
+
+    existing = fetch_paginated(wcapi, f"products?sku={sku}")
+    if not existing and product_data.get("sku") and product_data["sku"] != sku:
+        # It may have been uploaded as a variable product under the product SKU; convert it in place
+        existing = [p for p in fetch_paginated(wcapi, f"products?sku={product_data['sku']}") if p.get("type") == "variable"]
+        if existing:
+            product_id = existing[0]["id"]
+            # Its variations must go first: one of them still holds the SKU the simple product takes
+            old = fetch_paginated(wcapi, f"products/{product_id}/variations")
+            if old:
+                _retry(wcapi.post, f"products/{product_id}/variations/batch", {"delete": [o["id"] for o in old]},
+                       label=f"delete variations before converting {name}")
+            logger.info("Converting variable product '%s' (ID: %d) to simple", name, product_id)
+
+    if existing and force:
+        resp = _retry(wcapi.delete, f"products/{existing[0]['id']}", params={"force": True}, label=f"delete product {name}")
+        if resp.status_code not in (200, 201):
+            logger.error("Failed to delete '%s' for re-upload: %s", name, resp.text)
+            return
+        existing = []
+
+    if existing:
+        product_id = existing[0]["id"]
+        resp = _retry(wcapi.put, f"products/{product_id}", payload, label=f"update simple product {name}")
+        if resp.status_code == 200:
+            logger.info("Updated simple product '%s' (ID: %d)", name, product_id)
+        else:
+            logger.error("Failed to update simple product '%s': %s", name, resp.text)
+        return
+
+    resp = _retry(wcapi.post, "products", payload, label=f"create simple product {name}")
+    if resp.status_code == 201:
+        logger.info("Created simple product '%s' (ID: %d)", name, resp.json()["id"])
+    else:
+        logger.error("Failed to create simple product '%s': %s", name, resp.text)
+
+
 def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings, catalog_colors, force=False, square_pad=False, randomize_image=False, set_category_images=False):
     """Create or update a variable product with all its variations."""
     name = product_data["name"]
@@ -526,6 +671,10 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
     if not variations:
         logger.info("Skipping '%s' (no variations)", name)
         return
+
+    if product_data.get("type") == "simple" or len(variations) == 1:
+        return upload_simple_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_mappings,
+                                     force=force, square_pad=square_pad, set_category_images=set_category_images)
 
     logger.info("=== Processing: %s (%s) — %d variations ===", name, sku, len(variations))
 
@@ -647,6 +796,12 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
     }
 
     existing_products = fetch_paginated(wcapi, f"products?sku={sku}")
+    if not existing_products and not force:
+        # It may have been uploaded as a simple product (one variation) under a variation SKU;
+        # convert that product in place so its WooCommerce ID and URL are kept
+        converted = _convert_simple_to_variable(wcapi, name, sku, [v["sku"] for v in variations])
+        if converted:
+            existing_products = [converted]
     if existing_products:
         product_id = existing_products[0]["id"]
         if force:
@@ -890,6 +1045,14 @@ def update_color_swatches(wcapi, site, color_mappings):
 # ---------------------------------------------------------------------------
 # Store audit + fix
 # ---------------------------------------------------------------------------
+def _woo_sku(product):
+    """The SKU a product is stored under in WooCommerce: a simple product uses its one variation's SKU."""
+    variations = product.get("variations") or []
+    if (product.get("type") == "simple" or len(variations) == 1) and variations and variations[0].get("sku"):
+        return variations[0]["sku"].strip().upper()
+    return product["sku"].strip().upper()
+
+
 def _audit_product(wcapi, expected_product, wc_product):
     """
     Compare one expected product against its WooCommerce counterpart.
@@ -900,6 +1063,21 @@ def _audit_product(wcapi, expected_product, wc_product):
     warnings = []
 
     expected_variations = expected_product.get("variations", [])
+
+    # Simple products (one variation): compare the product itself
+    if expected_product.get("type") == "simple" or len(expected_variations) == 1:
+        expected = expected_variations[0] if expected_variations else {}
+        if wc_product.get("type") != "simple":
+            issues.append(f"Expected a simple product but WooCommerce has type '{wc_product.get('type')}'")
+        exp_sku = (expected.get("sku") or expected_product.get("sku") or "").strip().upper()
+        if (wc_product.get("sku") or "").strip().upper() != exp_sku:
+            issues.append(f"SKU is '{wc_product.get('sku')}', expected '{exp_sku}'")
+        if expected.get("price") is not None and wc_product.get("regular_price") not in (None, ""):
+            if abs(float(wc_product["regular_price"]) - float(expected["price"])) > 0.005:
+                issues.append(f"Price is {wc_product['regular_price']}, expected {float(expected['price']):.2f}")
+        if not wc_product.get("images"):
+            issues.append("Product has no image")
+        return {"issues": issues, "warnings": warnings}
 
     # Variation count — collected below after per-variation checks
     wc_var_ids = wc_product.get("variations", [])
@@ -983,7 +1161,7 @@ def _gather_audit_data(wcapi, data):
     """
     products = data.get("products", [])
     expected = [p for p in products if p.get("built") and p.get("variations")]
-    expected_by_sku = {p["sku"].strip().upper(): p for p in expected}
+    expected_by_sku = {_woo_sku(p): p for p in expected}
 
     logger.info("Fetching all WooCommerce products...")
     wc_products = fetch_paginated(wcapi, "products")
@@ -1000,7 +1178,7 @@ def _gather_audit_data(wcapi, data):
     extraneous = []  # in WC but not in expected set
 
     for ep in expected:
-        sku = ep["sku"].strip().upper()
+        sku = _woo_sku(ep)
         if sku not in wc_by_sku:
             missing.append(ep)
             logger.info("MISSING  : %s (%s)", ep["name"], ep["sku"])
@@ -1391,11 +1569,11 @@ def preflight(wcapi, data):
         if p.get("built") is False or not p.get("variations") or p.get("excludeFromWebstore"):
             continue
         for v in p["variations"]:
-            cs = v["colorSku"]
-            if cs not in all_colors:
+            cs = v.get("colorSku") or ""
+            if cs and cs not in all_colors:
                 all_colors[cs] = color_by_sku.get(cs, {"name": cs, "slug": cs.lower()})
-            fs = v["fitSku"]
-            if fs not in all_fits:
+            fs = v.get("fitSku") or ""
+            if fs and fs not in all_fits:
                 all_fits[fs] = fit_by_sku.get(fs, {"name": fs, "slug": fs.lower()})
             if v.get("size"):
                 all_sizes.add(v["size"])
@@ -1501,6 +1679,7 @@ def _build_woo_export(raw: dict) -> dict:
             "colorSku": sc.get("mappedColor", {}).get("sku") or "" if sc.get("mappedColor") else "",
             "catalogColorId": sc.get("catalogColorId"),
             "price": v.get("price"),
+            "weight": v.get("weight"),  # grams
             "mockups": mockups,
         }
 
@@ -1524,6 +1703,8 @@ def _build_woo_export(raw: dict) -> dict:
             export_variations = [_map_variation(v) for v in sorted_vars]
 
         products.append({
+            # One variation means nothing for the shopper to choose: a WooCommerce simple product
+            "type": "simple" if len(export_variations) == 1 else "variable",
             "name": f"{group['name']} {product['name']}",
             "sku": product_sku,
             "categories": product.get("categories") or [],
@@ -1541,8 +1722,11 @@ def _build_woo_export(raw: dict) -> dict:
             continue
         sorted_vars = sorted(mp.get("variations") or [], key=lambda v: v.get("sizeOrder") or 0)
         products.append({
+            "type": "simple" if len(sorted_vars) == 1 else "variable",
             "name": mp.get("name") or mp["productSku"],
             "sku": mp["productSku"],
+            "description": mp.get("description"),
+            "image": mp.get("imageUrl"),
             "categories": [],
             "tags": [],
             "built": True,
@@ -1591,9 +1775,9 @@ def fetch_from_orderboard(api_url: str, email: str, password: str, store_id: str
             id designGroupId designerProductId variationSkus colorPlacements
           }}
           products(storeId: $storeId) {{
-            id name productSku excludeFromWebstore
+            id name productSku excludeFromWebstore description imageUrl
             variations {{
-              sku price sizeOrder
+              sku price weight sizeOrder
               mappedFit {{ name sku }}
               catalogSize {{ name }}
               mockupUrls {{ url viewName }}
