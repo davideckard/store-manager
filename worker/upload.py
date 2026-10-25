@@ -23,6 +23,7 @@ Optional environment variables:
 import argparse
 import base64
 import hashlib
+import html
 import random
 import datetime
 import getpass
@@ -102,6 +103,8 @@ _image_locks_guard = threading.Lock()  # protects _image_locks dict itself
 _orderboard_sem = threading.Semaphore(3)  # caps concurrent orderboard image downloads
 _category_media: dict = {}       # category_id (int) -> [media_id, ...] collected during upload
 _category_media_lock = threading.Lock()
+_category_cache: list = []      # all WooCommerce product categories, loaded once per run
+_category_lock = threading.Lock()  # serializes category lookup/creation across upload workers
 
 
 def _image_lock_for(filename: str) -> threading.Lock:
@@ -316,40 +319,51 @@ def ensure_attribute_terms(wcapi, attr_id, terms):
 # ---------------------------------------------------------------------------
 def ensure_categories(wcapi, categories):
     """Ensure category hierarchy exists. Returns list of {"id": int} dicts."""
-    all_categories = fetch_paginated(wcapi, "products/categories")
     category_ids = []
 
-    for cat_path in categories:
-        path_parts = [p.strip() for p in cat_path.split(">")]
-        parent_id = 0
-        final_id = None
+    # Serialized so concurrent workers never race to create the same category
+    with _category_lock:
+        if not _category_cache:
+            _category_cache.extend(fetch_paginated(wcapi, "products/categories"))
 
-        for cat_name in path_parts:
-            if not cat_name:
-                continue
-            found = next(
-                (c for c in all_categories
-                 if c["name"].lower() == cat_name.lower() and c["parent"] == parent_id),
-                None,
-            )
-            if found:
-                final_id = found["id"]
-                parent_id = final_id
-            else:
-                resp = _retry(wcapi.post, "products/categories", {"name": cat_name, "parent": parent_id}, label=f"create category {cat_name}")
-                if resp.status_code == 201:
-                    new_cat = resp.json()
-                    all_categories.append(new_cat)
-                    final_id = new_cat["id"]
+        for cat_path in categories:
+            path_parts = [p.strip() for p in cat_path.split(">")]
+            parent_id = 0
+            final_id = None
+
+            for cat_name in path_parts:
+                if not cat_name:
+                    continue
+                # WooCommerce returns names HTML-escaped (e.g. "&amp;")
+                found = next(
+                    (c for c in _category_cache
+                     if html.unescape(c["name"]).lower() == cat_name.lower() and c["parent"] == parent_id),
+                    None,
+                )
+                if found:
+                    final_id = found["id"]
                     parent_id = final_id
+                    continue
+
+                resp = _retry(wcapi.post, "products/categories", {"name": cat_name, "parent": parent_id}, label=f"create category {cat_name}")
+                data = resp.json() if resp.text else {}
+                resource_id = (data.get("data") or {}).get("resource_id") if isinstance(data, dict) else None
+                if resp.status_code == 201:
+                    _category_cache.append(data)
+                    final_id = data["id"]
                     logger.info("Created category '%s' (ID: %d)", cat_name, final_id)
+                elif data.get("code") == "term_exists" and resource_id:
+                    _category_cache.append({"id": resource_id, "name": cat_name, "parent": parent_id})
+                    final_id = resource_id
+                    logger.info("Reusing existing category '%s' (ID: %d)", cat_name, final_id)
                 else:
                     logger.error("Failed to create category '%s': %s", cat_name, resp.text)
                     final_id = None
                     break
+                parent_id = final_id
 
-        if final_id and {"id": final_id} not in category_ids:
-            category_ids.append({"id": final_id})
+            if final_id and {"id": final_id} not in category_ids:
+                category_ids.append({"id": final_id})
 
     return category_ids
 
@@ -1089,14 +1103,14 @@ def _audit_product(wcapi, expected_product, wc_product):
             part = part.strip()
             if part:
                 expected_cat_names.add(part.lower())
-    wc_cat_names = {c["name"].lower() for c in wc_product.get("categories", [])}
+    wc_cat_names = {html.unescape(c["name"]).lower() for c in wc_product.get("categories", [])}
     missing_cats = expected_cat_names - wc_cat_names
     if missing_cats:
         issues.append(f"Missing categories: {', '.join(sorted(missing_cats))}")
 
     # Tags
     expected_tag_names = {t.lower() for t in expected_product.get("tags", [])}
-    wc_tag_names = {t["name"].lower() for t in wc_product.get("tags", [])}
+    wc_tag_names = {html.unescape(t["name"]).lower() for t in wc_product.get("tags", [])}
     missing_tags = expected_tag_names - wc_tag_names
     if missing_tags:
         issues.append(f"Missing tags: {', '.join(sorted(missing_tags))}")
@@ -2104,6 +2118,7 @@ def main():
     _image_cache.clear()
     _image_locks.clear()
     _category_media.clear()
+    _category_cache.clear()
 
     # Pre-create all attributes and terms before threads start
     woo_attrs = preflight(main_wcapi, data)
