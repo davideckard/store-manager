@@ -15,6 +15,7 @@ function buildArgPreview(p: Record<string, unknown>): string[] {
   if (p.mode === 'audit') args.push('--audit', '--audit-file', 'report.txt')
   if (p.mode === 'fix')   args.push('--fix',   '--fix-file',   'report.txt')
   if (p.force && p.mode === 'upload') args.push('--force')
+  if (p.deleteExtraneous && (p.mode === 'upload' || p.mode === 'fix')) args.push('--delete-extraneous')
   if (p.filterSkus && Array.isArray(p.filterSkus) && p.filterSkus.length > 0)
     args.push('--filter-skus', (p.filterSkus as string[]).join(','))
   if (p.fromAuditJob) args.push('--from-audit', `[report of job ${p.fromAuditJob}]`)
@@ -27,6 +28,7 @@ const LABELS: Record<string, string> = {
   storeId:       'Store ID',
   orderboardUrl: 'Orderboard URL',
   force:         'Force',
+  deleteExtraneous: 'Delete Extraneous',
   fromAuditJob:  'From Audit Job',
   filterSkus:    'Filter SKUs',
 }

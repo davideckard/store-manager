@@ -1425,13 +1425,116 @@ def audit_store(wcapi, site, data, output_file,
     )
 
 
+def _orderboard_skus(data):
+    """WooCommerce SKUs of every built orderboard product — anything else on the site is extraneous."""
+    return {_woo_sku(p) for p in data.get("products", []) if p.get("built") and p.get("variations")}
+
+
+def _product_media_ids(wcapi, wc_product):
+    """Media IDs used by a WooCommerce product: its gallery images plus any variation images."""
+    ids = {img["id"] for img in wc_product.get("images", []) if img.get("id")}
+    if wc_product.get("type") == "variable":
+        for v in fetch_paginated(wcapi, f"products/{wc_product['id']}/variations"):
+            img = v.get("image") or {}
+            if img.get("id"):
+                ids.add(img["id"])
+    return ids
+
+
+def delete_extraneous_products(wcapi, site, data, wc_products=None):
+    """
+    Delete every SKU'd WooCommerce product whose SKU is not in orderboard, along
+    with its media files. Media still used by a kept product (or uploaded this
+    run) is left in place. Products without a SKU are never touched.
+
+    Returns report lines describing what was deleted.
+    """
+    expected_skus = _orderboard_skus(data)
+    if not expected_skus:
+        # An empty orderboard response would otherwise wipe the whole store
+        logger.error("No orderboard products loaded — refusing to delete extraneous products.")
+        return ["  Skipped: no orderboard products were loaded, refusing to delete anything."]
+
+    if wc_products is None:
+        logger.info("Fetching all WooCommerce products...")
+        wc_products = fetch_paginated(wcapi, "products")
+
+    extraneous = []
+    protected_media = {m["id"] for m in _image_cache.values() if m.get("id")}
+    for wp in wc_products:
+        sku = (wp.get("sku") or "").strip().upper()
+        if sku and sku not in expected_skus:
+            extraneous.append(wp)
+        else:
+            protected_media.update(img["id"] for img in wp.get("images", []) if img.get("id"))
+
+    if not extraneous:
+        logger.info("No extraneous products to delete.")
+        return ["  No extraneous products — nothing deleted."]
+
+    logger.info("Deleting %d extraneous product(s) not in orderboard...", len(extraneous))
+    lines = [f"Deleting {len(extraneous)} product(s) not in orderboard:"]
+    deleted = failed = media_deleted = 0
+    for wp in extraneous:
+        media_ids = _product_media_ids(wcapi, wp) - protected_media
+        resp = _retry(
+            wcapi.delete, f"products/{wp['id']}",
+            params={"force": True},
+            label=f"delete {wp['sku']}",
+        )
+        if resp.status_code not in (200, 201):
+            logger.error("Failed to delete '%s': HTTP %d — %s", wp["name"], resp.status_code, resp.text)
+            failed += 1
+            lines.append(f"  [FAIL]    [{wp['sku']}] {wp['name']} — delete failed HTTP {resp.status_code}")
+            continue
+        deleted += 1
+        logger.info("Deleted extraneous product '%s' (WC ID: %d)", wp["name"], wp["id"])
+
+        media_failed = 0
+        for media_id in media_ids:
+            try:
+                r = _retry(
+                    requests.delete,
+                    f"{site['url']}/wp-json/wp/v2/media/{media_id}",
+                    params={"force": True},
+                    headers=wp_auth_headers(site),
+                    timeout=30,
+                    label=f"delete media {media_id}",
+                )
+                if r.status_code in (200, 201, 404):
+                    media_deleted += 1
+                else:
+                    media_failed += 1
+                    logger.warning("Could not delete media %d: HTTP %d", media_id, r.status_code)
+            except Exception as e:
+                media_failed += 1
+                logger.warning("Could not delete media %d: %s", media_id, e)
+        note = f", {media_failed} media delete(s) failed" if media_failed else ""
+        lines.append(
+            f"  [DELETED] [{wp['sku']}] {wp['name']}  (WC ID: {wp['id']}, {len(media_ids)} media file(s){note})"
+        )
+
+    lines += [
+        "",
+        f"Delete result: {deleted} product(s) deleted, {failed} failed, {media_deleted} media file(s) removed",
+        "",
+    ]
+    logger.info(
+        "Extraneous cleanup: %d deleted, %d failed, %d media file(s) removed",
+        deleted, failed, media_deleted,
+    )
+    return lines
+
+
 def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalog_colors, output_file,
-              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None, square_pad=False, randomize_image=False):
+              source_label="", orderboard_store_id="", orderboard_url="", filter_skus=None, square_pad=False, randomize_image=False,
+              delete_extraneous=False):
     """
     Audit the store, then for each product with hard issues delete it from
     WooCommerce and re-upload it fresh. Missing products are uploaded normally.
     Products with warnings only (e.g. extra variations) are skipped.
-    Extraneous products are reported but never auto-deleted.
+    Extraneous products are reported, and deleted (with their media) only when
+    delete_extraneous=True.
 
     filter_skus: if provided, only fix products whose SKU is in this set.
     """
@@ -1520,6 +1623,10 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
         "",
     ]
 
+    # --- Delete extraneous products (re-fetched, since the fix changed product IDs) ---
+    if delete_extraneous:
+        fix_lines += delete_extraneous_products(wcapi, site, data)
+
     _write_report(
         site, gathered, output_file,
         title="STORE AUDIT + FIX REPORT",
@@ -1530,8 +1637,9 @@ def fix_store(wcapi, site, data, woo_attrs, color_mappings, fit_mappings, catalo
     )
     logger.info(
         "Fix complete: %d re-uploaded, %d newly uploaded, %d failed,"
-        " %d extraneous (not auto-deleted)",
+        " %d extraneous (%s)",
         len(fixed), len(uploaded_new), len(failed), len(gathered["extraneous"]),
+        "deleted" if delete_extraneous else "not auto-deleted",
     )
 
 
@@ -1878,6 +1986,11 @@ def main():
         metavar="SKUS",
         help="Comma-separated SKUs to upload; omit to upload all built products",
     )
+    parser.add_argument(
+        "--delete-extraneous",
+        action="store_true",
+        help="With upload or --fix: delete products (and their media) whose SKU is not in orderboard (skipped for partial uploads)",
+    )
     args = parser.parse_args()
     SITE_ID = args.site_id
 
@@ -1945,10 +2058,10 @@ def main():
     products = data.get("products", [])
 
     logger.info(
-        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s  randomize_image: %s  set_category_images: %s",
+        "Products: %d  Site: %s  URL: %s  mode: %s  force: %s  square_pad: %s  randomize_image: %s  set_category_images: %s  delete_extraneous: %s",
         len(products), SITE_ID, site["url"],
         "audit" if args.audit else ("fix" if args.fix else "upload"),
-        args.force, args.square_pad, args.randomize_image, args.set_category_images,
+        args.force, args.square_pad, args.randomize_image, args.set_category_images, args.delete_extraneous,
     )
 
     main_wcapi = get_wcapi(site)
@@ -1983,6 +2096,7 @@ def main():
             filter_skus=filter_skus,
             square_pad=args.square_pad,
             randomize_image=args.randomize_image,
+            delete_extraneous=args.delete_extraneous,
         )
         return
 
@@ -2019,6 +2133,13 @@ def main():
                 future.result()
             except Exception as e:
                 logger.error("Upload failed for '%s': %s", futures[future], e)
+
+    # Delete before category images are assigned so no category points at a removed image
+    if args.delete_extraneous:
+        if args.filter_skus:
+            logger.info("Skipping --delete-extraneous for a partial upload.")
+        else:
+            delete_extraneous_products(main_wcapi, site, data)
 
     # Post-upload housekeeping (single-threaded, order matters)
     logger.info("Running post-upload tasks...")

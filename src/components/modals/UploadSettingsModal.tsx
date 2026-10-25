@@ -7,6 +7,7 @@ export interface UploadSettings {
   squarePad: boolean
   randomizeImage: boolean
   setCategoryImages: boolean
+  deleteExtraneous: boolean
 }
 
 interface Props {
@@ -89,6 +90,25 @@ export function UploadSettingsModal({ open, settings, onChange, onClose, isParti
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   After a full upload, assign a random product image to each category.
+                </p>
+              </div>
+            </label>
+
+            <label className={`flex items-start gap-3 ${isPartialUpload ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+              <input
+                type="checkbox"
+                checked={settings.deleteExtraneous}
+                onChange={e => set({ deleteExtraneous: e.target.checked })}
+                className="rounded mt-0.5"
+                disabled={isPartialUpload}
+              />
+              <div>
+                <p className="text-sm font-medium text-slate-700">
+                  Delete Products Not in Orderboard
+                  {isPartialUpload && <span className="ml-2 text-xs font-normal text-slate-400">(N/A — partial upload)</span>}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  After a full upload, delete site products whose SKU is not in orderboard, along with their media files.
                 </p>
               </div>
             </label>

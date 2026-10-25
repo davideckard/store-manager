@@ -15,7 +15,7 @@ interface Product {
   name: string
 }
 
-const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true, randomizeImage: true, setCategoryImages: true }
+const DEFAULT_SETTINGS: UploadSettings = { force: false, squarePad: true, randomizeImage: true, setCategoryImages: true, deleteExtraneous: false }
 
 export function JobForm({ onSubmitted, auditJobs }: Props) {
   const [sites, setSites] = useState<Site[]>([])
@@ -92,6 +92,7 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
         squarePad: settings.squarePad,
         randomizeImage: settings.randomizeImage,
         setCategoryImages: settings.setCategoryImages,
+        deleteExtraneous: settings.deleteExtraneous,
       }),
     })
     setSubmitting(false)
@@ -155,6 +156,13 @@ export function JobForm({ onSubmitted, auditJobs }: Props) {
               ))}
             </select>
           </>
+        )}
+
+        {mode === 'fix' && (
+          <label className="flex items-center gap-2 mb-3 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={settings.deleteExtraneous} onChange={e => setSettings({ ...settings, deleteExtraneous: e.target.checked })} className="rounded" />
+            Delete products not in orderboard (and their media)
+          </label>
         )}
 
         <div className="flex gap-2 mt-1">
