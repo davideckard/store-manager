@@ -368,6 +368,18 @@ def ensure_categories(wcapi, categories):
     return category_ids
 
 
+def _log_categories(name, categories, category_ids):
+    """Log the categories a product is being assigned, so missing or wrong ones show up in the job log."""
+    if not categories:
+        logger.warning("No categories in orderboard for '%s'", name)
+    elif len(category_ids) < len(categories):
+        logger.warning("Categories for '%s': %s → only resolved IDs %s",
+                       name, "; ".join(categories), [c["id"] for c in category_ids])
+    else:
+        logger.info("Categories for '%s': %s → IDs %s",
+                    name, "; ".join(categories), [c["id"] for c in category_ids])
+
+
 def ensure_tags(wcapi, tags):
     """Ensure tags exist. Returns list of {"id": int} dicts."""
     existing = fetch_paginated(wcapi, "products/tags")
@@ -604,6 +616,7 @@ def upload_simple_product(wcapi, site, woo_attrs, product_data, color_mappings, 
             attr_list.append({"id": attr["id"], "position": position, "visible": True, "variation": False, "options": [value]})
 
     category_ids = ensure_categories(wcapi, product_data.get("categories", []))
+    _log_categories(name, product_data.get("categories", []), category_ids)
     tag_ids = ensure_tags(wcapi, product_data.get("tags", []))
 
     # Image: the variation's catalog mockup when there is one, otherwise the product's own image
@@ -774,6 +787,7 @@ def upload_product(wcapi, site, woo_attrs, product_data, color_mappings, fit_map
 
     # --- Ensure categories and tags ---
     category_ids = ensure_categories(wcapi, product_data.get("categories", []))
+    _log_categories(name, product_data.get("categories", []), category_ids)
     tag_ids = ensure_tags(wcapi, product_data.get("tags", []))
 
     # --- Upload parent product image ---
@@ -1814,7 +1828,10 @@ def _build_woo_export(raw: dict) -> dict:
             continue
 
         group_sku_part = group.get("sku") or group["name"]
-        product_sku = f"{sku_prefix}-{group_sku_part}-{product['sku']}"
+        # Some group SKUs already carry the store prefix (e.g. "AHS-AP"); don't add it twice
+        if sku_prefix and not group_sku_part.upper().startswith(f"{sku_prefix.upper()}-"):
+            group_sku_part = f"{sku_prefix}-{group_sku_part}"
+        product_sku = f"{group_sku_part}-{product['sku']}"
         designer_skus.add(product_sku.strip().upper())
 
         built = built_by_sku.get(product_sku.strip().upper())

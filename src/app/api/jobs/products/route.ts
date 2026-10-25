@@ -76,8 +76,11 @@ export async function POST(req: NextRequest) {
       const group = groupById[mapping.designGroupId]
       const product = productById[mapping.designerProductId]
       if (!group || !product) continue
-      const groupSkuPart = group.sku || group.name
-      const sku = `${skuPrefix}-${groupSkuPart}-${product.sku}`
+      let groupSkuPart = group.sku || group.name
+      // Some group SKUs already carry the store prefix (e.g. "AHS-AP"); don't add it twice
+      if (skuPrefix && !groupSkuPart.toUpperCase().startsWith(`${skuPrefix.toUpperCase()}-`))
+        groupSkuPart = `${skuPrefix}-${groupSkuPart}`
+      const sku = `${groupSkuPart}-${product.sku}`
       const upperSku = sku.trim().toUpperCase()
       designerSkus.add(upperSku)
       products.push({ sku, name: `${group.name} ${product.name}`, excludeFromWebstore: excludeBySku[upperSku] ?? false })
