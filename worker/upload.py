@@ -16,7 +16,8 @@ Positional argument:
 Optional environment variables:
   DATABASE_SERVER_URL  - Override the config.py default (http://192.168.0.2:8888)
   ORDERBOARD_BASE_URL  - Base URL for fetching mockup images
-                         (default: https://orderboard.mlswebstores.com)
+                         (default: the --orderboard-url in --api mode,
+                         otherwise https://orderboard.mlswebstores.com)
   PRODUCTS_FILE        - Path to JSON file (default: woocommerce_products.json)
 """
 
@@ -619,7 +620,8 @@ def upload_simple_product(wcapi, site, woo_attrs, product_data, color_mappings, 
     _log_categories(name, product_data.get("categories", []), category_ids)
     tag_ids = ensure_tags(wcapi, product_data.get("tags", []))
 
-    # Image: the variation's catalog mockup when there is one, otherwise the product's own image
+    # Image: the variation's first mockup (a catalog mockup, or for a product with no catalog blank
+    # the mockup in the product's media); product imageUrl only for products made before media mockups
     images = []
     mockups = v.get("mockups") or v.get("mockupUrls") or []
     image_url = (mockups[0]["urlpath"] if isinstance(mockups[0], dict) else mockups[0]) if mockups else product_data.get("image")
@@ -631,6 +633,9 @@ def upload_simple_product(wcapi, site, woo_attrs, product_data, color_mappings, 
                 with _category_media_lock:
                     for cat in category_ids:
                         _category_media.setdefault(cat["id"], []).append(media["id"])
+    if not images:
+        logger.warning("Simple product '%s' has no image%s", name,
+                       f" (could not fetch {image_url})" if image_url else " (no mockup in orderboard)")
 
     payload = {
         "name": name,
@@ -1940,7 +1945,7 @@ def fetch_from_orderboard(api_url: str, email: str, password: str, store_id: str
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    global SITE_ID
+    global SITE_ID, ORDERBOARD_BASE_URL
     parser = argparse.ArgumentParser(description="Upload products to a WooCommerce store.")
     parser.add_argument(
         "site_id",
@@ -2071,6 +2076,10 @@ def main():
         source_label = f"orderboard API (store: {store_id})"
         ob_store_id = store_id
         ob_url = api_url
+        # Images (mockups and uploaded product images) live on the same orderboard as the data
+        if "ORDERBOARD_BASE_URL" not in os.environ:
+            ORDERBOARD_BASE_URL = api_url
+        logger.info("Fetching images from %s", ORDERBOARD_BASE_URL)
     else:
         products_file = PRODUCTS_FILE
         if not os.path.isfile(products_file):
