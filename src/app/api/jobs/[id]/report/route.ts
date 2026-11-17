@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import { reportPath } from '@/lib/jobRunner'
+import { requireAuth } from '@/lib/apiAuth'
 
 type Ctx = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Ctx) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   const { id } = await params
   const rp = reportPath(id)
   if (!rp) return NextResponse.json({ error: 'No report found' }, { status: 404 })

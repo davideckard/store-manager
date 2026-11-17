@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { runJob } from '@/lib/jobRunner'
+import { requireAuth } from '@/lib/apiAuth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     const { reportPath, reportHasIssues } = await import('@/lib/jobRunner')
     const jobs = await prisma.job.findMany({ orderBy: { createdAt: 'desc' } })
@@ -18,7 +21,9 @@ export async function GET() {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     await prisma.job.deleteMany()
     return NextResponse.json({ ok: true })
@@ -28,6 +33,8 @@ export async function DELETE() {
 }
 
 export async function POST(req: NextRequest) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     const body = await req.json()
     const { siteId, mode, storeId, orderboardUrl, force, squarePad, randomizeImage, setCategoryImages, deleteExtraneous, fromAuditJob, filterSkus, email, password } = body

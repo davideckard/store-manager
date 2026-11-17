@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import { logPath } from '@/lib/jobRunner'
+import { requireAuth } from '@/lib/apiAuth'
 
 type Ctx = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Ctx) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   const { id } = await params
   const lp = logPath(id)
   const content = fs.existsSync(lp) ? fs.readFileSync(lp, 'utf8') : ''

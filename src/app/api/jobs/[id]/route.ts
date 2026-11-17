@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { killJob, cancelJob, reportPath, reportHasIssues } from '@/lib/jobRunner'
+import { requireAuth } from '@/lib/apiAuth'
 
 type Ctx = { params: Promise<{ id: string }> }
 
-export async function GET(_: NextRequest, { params }: Ctx) {
+export async function GET(req: NextRequest, { params }: Ctx) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     const { id } = await params
     const job = await prisma.job.findUnique({ where: { id } })
@@ -19,7 +22,9 @@ export async function GET(_: NextRequest, { params }: Ctx) {
   }
 }
 
-export async function PATCH(_: NextRequest, { params }: Ctx) {
+export async function PATCH(req: NextRequest, { params }: Ctx) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     const { id } = await params
     const stopped = cancelJob(id)
@@ -30,7 +35,9 @@ export async function PATCH(_: NextRequest, { params }: Ctx) {
   }
 }
 
-export async function DELETE(_: NextRequest, { params }: Ctx) {
+export async function DELETE(req: NextRequest, { params }: Ctx) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   try {
     const { id } = await params
     killJob(id)

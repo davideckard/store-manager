@@ -1,8 +1,11 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { requireAuth } from '@/lib/apiAuth'
 
 const GQL_URL = (process.env.ORDERBOARD_API_URL ?? 'https://orderboard.mlswebstores.com') + '/api/graphql'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAuth(req)
+  if (deny) return deny
   const email = process.env.ORDERBOARD_EMAIL ?? ''
   const password = process.env.ORDERBOARD_PASSWORD ?? ''
 
